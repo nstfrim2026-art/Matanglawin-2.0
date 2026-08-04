@@ -1,96 +1,68 @@
-# Deploying Matanglawin to a live public URL
+# Running MATANGLAWIN where the camera is
 
-The site is a Flask + PyTorch app, so it needs a host that can run a Python
-web server. The recommended free host is **Hugging Face Spaces**, which is
-built for ML demos and has enough memory for PyTorch (the tiny free tier that
-some other hosts offer will run out of memory).
+MATANGLAWIN reads a live camera feed directly on the server side (via
+OpenCV), then streams the annotated video to the browser. That means it
+must run **on or near the camera** — a public cloud host has no way to
+see a webcam sitting on your desk or a phone on your Wi-Fi network. This
+is a local/field monitoring tool, not a public demo website.
 
-The repo already contains a `Dockerfile` that Hugging Face can run directly.
+There are two practical ways to run it:
 
----
+## Option A — Run directly on the operator's laptop (simplest)
 
-## Option A — Hugging Face Spaces (recommended, free, ~5 minutes)
+This is the normal way to use it day-to-day.
 
-You only need a free Hugging Face account. No credit card, no servers to manage.
-
-### 1. Create the account
-Sign up at https://huggingface.co/join
-
-### 2. Create a new Space
-- Go to https://huggingface.co/new-space
-- **Space name:** e.g. `matanglawin`
-- **License:** your choice
-- **Select the SDK:** choose **Docker** → **Blank**
-- **Hardware:** the free **CPU basic** is fine
-- Click **Create Space**
-
-### 3. Add the project files to the Space
-A Hugging Face Space is itself a git repo. The simplest way to fill it:
-
-**Easiest (web upload):**
-- On your new Space page, click **Files** → **Add file** → **Upload files**
-- Upload everything from this project:
-  `Dockerfile`, `app.py`, `inference_core.py`, `requirements.txt`,
-  `best.pt`, and the `templates/` and `static/` folders.
-- Commit the changes.
-
-**Or via git:**
 ```bash
-git clone https://huggingface.co/spaces/<your-username>/matanglawin
-cd matanglawin
-# copy the project files into this folder (Dockerfile, app.py, best.pt, etc.)
-git add .
-git commit -m "Add Matanglawin crack-detection app"
-git push
+python3 -m venv venv
+source venv/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+python app.py
 ```
 
-### 4. Confirm the Space config
-Hugging Face reads a small YAML header at the top of the Space's `README.md`.
-Make sure it looks like this (create/edit `README.md` in the Space if needed):
+Open `http://localhost:5000` on that same laptop. The webcam source
+uses the laptop's built-in/USB camera. To use a phone camera instead,
+install [DroidCam](https://www.dev47apps.com/) on the phone, connect it
+to the same Wi-Fi as the laptop, and set:
 
-```yaml
----
-title: Matanglawin
-emoji: 👁️
-colorFrom: red
-colorTo: gray
-sdk: docker
-app_port: 7860
-pinned: false
----
+```bash
+export DROIDCAM_URL="http://<phone-ip>:4747/video"
+python app.py
 ```
 
-The important lines are `sdk: docker` and `app_port: 7860` (the port the
-app listens on).
+then select **DroidCam** in the dashboard's camera selector.
 
-### 5. Wait for the build
-The Space will show "Building" while it builds the Docker image (a few
-minutes the first time). When it flips to "Running", your site is live at:
+## Option B — One-click executable (no Python needed to run it)
 
-```
-https://<your-username>-matanglawin.hf.space
-```
+Build once with `./build_exe.sh` (or `build_exe.bat` on Windows), then
+hand the resulting `dist/Matanglawin` (or `.exe`) file to the operator.
+They double-click it; no Python install required on their machine. See
+the main [README.md](README.md) for details.
 
-Share that link with anyone. It goes to sleep after inactivity and wakes
-automatically on the next visit.
+## Option C — Docker, on the same machine/network as the camera
 
----
-
-## Option B — Any Docker host (Render, Fly.io, a VPS, etc.)
-
-Because the app is containerized, it runs anywhere Docker runs:
+Still local — Docker here is just for consistent deployment (e.g. onto
+a small field PC or edge box that sits next to the drone ground station),
+not for public internet hosting.
 
 ```bash
 docker build -t matanglawin .
-docker run -p 7860:7860 matanglawin
-# open http://localhost:7860
+docker run -p 5000:5000 --device=/dev/video0 matanglawin
 ```
 
-Point your host of choice at this `Dockerfile`. Note the app reads the
-`PORT` and `HOST` environment variables, so if a platform assigns a
-different port, set `PORT` accordingly (it defaults to 7860 in the image,
-and binds to `0.0.0.0`).
+- `--device=/dev/video0` passes the host's local webcam into the
+  container (Linux only; omit it if you're only using a network camera
+  source like DroidCam or the future drone feed).
+- Open `http://localhost:5000` from a browser on that machine, or from
+  another device on the same local network using the host machine's LAN
+  IP (e.g. `http://192.168.1.20:5000`).
 
-> Heads-up on memory: this app loads PyTorch, which needs roughly
-> ~1 GB RAM. Free tiers with 512 MB (e.g. Render free) will crash on
-> startup. Hugging Face Spaces' free CPU tier has plenty.
+## Why not host it on Hugging Face Spaces / a public cloud server?
+
+A cloud server has no route to your webcam, your phone's DroidCam
+stream, or a drone's local video downlink — those only exist on your
+local network. Public hosting would only make sense if the app received
+video *from* the browser (e.g. WebRTC) instead of opening the camera
+itself server-side. That's a different architecture than what was
+requested here (a continuous server-side OpenCV/YOLO pipeline), so for
+now this app is designed to run locally, next to the camera.

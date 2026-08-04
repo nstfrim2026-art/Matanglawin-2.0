@@ -1,69 +1,55 @@
-# Matanglawin-2.0
-Second Version
+# MATANGLAWIN — Real-Time AI-Assisted Drone Visual Crack Detection System
 
-## Web App
+A real-time monitoring dashboard that continuously reads a live camera
+feed (laptop webcam, a phone running DroidCam, or in the future a
+drone's video downlink), runs every frame through the trained YOLO11-seg
+model (`best.pt`), and highlights visible cracks directly on the live
+video with a semi-transparent red overlay — no bounding boxes, no
+measurements, no severity scores. It only detects and visually
+highlights cracks; it does not perform any structural analysis.
 
-A small Flask website (`app.py`) that lets you upload a photo of a
-surface (road, wall, pipe, etc.) in the browser and see the trained
-YOLO11-seg model (`best.pt`) highlight every crack it detects, using the
-same overlay logic as `infer_overlay.py` (exact mask contour, no
-bounding boxes), refactored into `inference_core.py` so both the CLI
-script and the website share it.
+When a crack is visible, the dashboard shows a blinking red alert banner
+and plays an alert sound once (not continuously). When no crack is
+visible, it simply shows "Monitoring...".
 
-### Option A: One-click executable (no Python required to *run* it)
+## Important: this is a local monitoring tool, not a public website
 
-This bundles Python, the website, and `best.pt` into a single
-executable. Anyone can double-click it and use the site &mdash; they
-don't need Python, pip, or any dependencies installed.
+Because the app reads a camera directly (via OpenCV) rather than through
+the visitor's browser, **it must run on a machine that has network
+access to the camera** — your own laptop's webcam, or a phone/drone on
+the same local network. It is not meant to be deployed as a public cloud
+demo that lets arbitrary internet visitors see your camera. Run it on
+the operator's laptop or a local server in the field/control room, and
+open it from a browser on that same machine or local network.
 
-**Build it once** (this step does need Python + the packages below):
+## Architecture
 
-```bash
-# Linux/macOS
-./build_exe.sh
+Kept intentionally separated per concern, so the video source can be
+swapped without ever touching the detection pipeline:
 
-# Windows
-build_exe.bat
-```
+- `video_source.py` — configurable camera abstraction (webcam / DroidCam
+  / future drone feed), all opened the same way via OpenCV.
+- `inference_core.py` — the YOLO11-seg model + mask-overlay drawing
+  logic, shared by the live dashboard, the original CLI script
+  (`infer_overlay.py`), and `detector.py`.
+- `detector.py` — a background worker thread that continuously pulls
+  frames from the selected video source, runs them through
+  `inference_core.annotate_frame`, and keeps the latest annotated JPEG
+  + status (`camera_connected`, `crack_present`) available for Flask to
+  serve, without blocking the video loop.
+- `app.py` — Flask routes only (dashboard page, MJPEG video stream,
+  status polling, camera-source switching, health check).
+- `templates/dashboard.html`, `static/` — the dashboard UI (HTML/CSS/
+  vanilla JS only — no frameworks).
 
-This creates `dist/Matanglawin` (or `dist/Matanglawin.exe` on Windows),
-a single file around 300-350&nbsp;MB (it embeds a CPU build of PyTorch).
-
-**Run it:** double-click `dist/Matanglawin(.exe)`. A console window
-opens showing server startup, and your default browser opens
-automatically to the site. Uploaded images and results are saved next
-to the executable in a `matanglawin_data/` folder. Closing the console
-window stops the app.
-
-> Note: build the executable separately on each OS you want to support
-> (a Linux build only runs on Linux, a Windows build only runs on
-> Windows, etc.) &mdash; PyInstaller does not cross-compile.
-
-### Get a live public link (hosted website)
-
-To put the site online with a shareable URL, deploy the included
-`Dockerfile` to **Hugging Face Spaces** (free, no credit card). Full
-step-by-step instructions are in [DEPLOY.md](DEPLOY.md). In short: create a
-free Hugging Face account, create a **Docker** Space, upload the project
-files, and it goes live at `https://<your-username>-matanglawin.hf.space`.
-
-You can also run the container anywhere Docker runs:
-
-```bash
-docker build -t matanglawin .
-docker run -p 7860:7860 matanglawin
-# open http://localhost:7860
-```
-
-### Option B: Run from source with Python
+## Run it
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate        # on Windows: venv\Scripts\activate
 
 # Recommended: install the CPU-only build of torch first (much smaller
-# than the default CUDA build, and all that's needed for single-image
-# inference):
+# than the default CUDA build):
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
 pip install -r requirements.txt
@@ -75,24 +61,71 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open http://localhost:5000 in your browser (set `AUTO_OPEN=1` to
-have it open automatically), upload an image, and click **Detect
-Cracks**. You can tweak confidence threshold, mask opacity, and outline
-thickness under "Advanced options" before detecting.
+Open http://localhost:5000 — you'll see the loading screen, then the
+live dashboard with your webcam feed and crack highlighting.
 
-Optional environment variables:
+### Camera sources
 
-- `WEIGHTS` - path to a different `.pt` weights file (default: `best.pt`)
-- `HOST` - host to bind to (default: `127.0.0.1`)
-- `PORT` - preferred port to listen on; if busy, a free one is chosen automatically (default: `5000`)
-- `AUTO_OPEN` - set to `1` to auto-open the browser in dev mode too
+Use the **Camera Source** selector at the bottom of the dashboard to
+switch between:
 
-### Files
+- **Webcam** — your machine's default local camera (device index 0)
+- **DroidCam** — a phone running the DroidCam app, streamed over your
+  local Wi-Fi (default MJPEG URL: `http://<phone-ip>:4747/video`)
+- **Drone Camera** — a placeholder slot for the future drone video feed
 
-- `app.py` - Flask web app (upload form, `/detect` route, `/health` check, auto-opens browser when run as the packaged executable)
-- `inference_core.py` - shared inference + overlay-drawing logic
-- `infer_overlay.py` - original standalone CLI script (unchanged)
-- `templates/`, `static/` - website HTML/CSS
-- `matanglawin.spec` - PyInstaller build configuration for the one-click executable
-- `build_exe.sh` / `build_exe.bat` - one-command build scripts (Linux/macOS and Windows)
-- `matanglawin_data/` (created at runtime, not committed) - uploaded images and detection results
+Configure the network camera URLs with environment variables before
+starting the app:
+
+```bash
+export DROIDCAM_URL="http://192.168.1.50:4747/video"
+export DRONE_URL="http://192.168.1.60:8080/video"
+python app.py
+```
+
+### Other environment variables
+
+- `WEIGHTS` — path to a different `.pt` weights file (default: `best.pt`)
+- `HOST` — host to bind to (default: `127.0.0.1`)
+- `PORT` — preferred port; a free one is chosen automatically if busy (default: `5000`)
+- `CONF` — detection confidence threshold (default: `0.25`)
+- `TARGET_FPS` — cap on the inference loop rate (default: `8`)
+- `DEFAULT_SOURCE` — `webcam` | `droidcam` | `drone` (default: `webcam`)
+- `AUTO_OPEN` — set to `1` to auto-open the browser on startup in dev mode
+
+## One-click executable (no Python required to *run* it)
+
+Bundles Python, the dashboard, and `best.pt` into a single executable
+for the operator's machine — no install needed to run it, only to build it.
+
+```bash
+./build_exe.sh      # Linux/macOS
+build_exe.bat        # Windows
+```
+
+This creates `dist/Matanglawin` (or `.exe`), ~300-350 MB. Double-click it
+— it opens a console and your browser automatically. Build separately
+per OS (PyInstaller does not cross-compile).
+
+## Running in Docker (same machine/local network as the camera)
+
+```bash
+docker build -t matanglawin .
+docker run -p 5000:5000 --device=/dev/video0 matanglawin
+# open http://localhost:5000
+```
+
+`--device=/dev/video0` passes the host's webcam into the container (Linux
+only). If you're only using a network camera source (DroidCam/drone
+URL), you can drop that flag. See [DEPLOY.md](DEPLOY.md) for more detail.
+
+## Files
+
+- `app.py` — Flask routes (dashboard, `/video_feed`, `/status`, `/set_source`, `/sources`, `/health`)
+- `detector.py` — background continuous-inference worker
+- `video_source.py` — configurable camera source abstraction
+- `inference_core.py` — shared YOLO11-seg inference + overlay-drawing logic
+- `infer_overlay.py` — original standalone single-image CLI script (unchanged)
+- `templates/dashboard.html`, `static/` — dashboard UI (HTML/CSS/vanilla JS, logo, alert sound)
+- `matanglawin.spec`, `build_exe.sh` / `build_exe.bat` — one-click executable build
+- `Dockerfile` — containerized deployment

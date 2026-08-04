@@ -1,12 +1,16 @@
-# Dockerfile - deploy the Matanglawin crack-detection website.
+# Dockerfile - run the MATANGLAWIN real-time crack-detection dashboard.
 #
-# Works on any Docker host, and is set up to run directly on
-# Hugging Face Spaces (Docker SDK), which serves on port 7860.
+# This must run on the same machine/local network as the camera (see
+# DEPLOY.md) - it is not meant for public cloud hosting, since the app
+# opens the camera directly via OpenCV on the server side.
 #
 # Build & run locally:
 #   docker build -t matanglawin .
-#   docker run -p 7860:7860 matanglawin
-#   -> open http://localhost:7860
+#   docker run -p 5000:5000 --device=/dev/video0 matanglawin
+#   -> open http://localhost:5000
+#
+# Drop --device=/dev/video0 if you're only using a network camera
+# source (DroidCam / future drone feed) instead of a local webcam.
 
 FROM python:3.11-slim
 
@@ -16,14 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Run as a non-root user (Hugging Face Spaces requires this).
+# Run as a non-root user.
 RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
     HOST=0.0.0.0 \
-    PORT=7860 \
-    # Keep image small: single-image CPU inference doesn't need CUDA.
+    PORT=5000 \
+    # Keep image small: CPU-only inference doesn't need CUDA.
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /home/user/app
@@ -39,11 +43,10 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY --chown=user . .
 
 # Point libraries that expect a writable config/cache dir at /tmp, so they
-# work regardless of the home directory's permissions on the host platform
-# (Hugging Face Spaces, etc.).
+# work regardless of the home directory's permissions on the host platform.
 ENV YOLO_CONFIG_DIR=/tmp/Ultralytics \
     MPLCONFIGDIR=/tmp/matplotlib
 
-EXPOSE 7860
+EXPOSE 5000
 
 CMD ["python", "app.py"]

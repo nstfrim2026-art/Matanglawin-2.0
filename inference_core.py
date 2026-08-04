@@ -83,3 +83,65 @@ def run_overlay(
 
     cv2.imwrite(str(out_path), blended)
     return {"num_instances": int(len(result.masks)), "out_path": str(out_path)}
+
+
+def annotate_frame(
+    frame_bgr: np.ndarray,
+    weights: str = "best.pt",
+    conf: float = 0.25,
+    imgsz: int = 640,
+    alpha: float = 0.45,
+    color: Tuple[int, int, int] = (0, 0, 255),  # B, G, R
+    outline: int = 2,
+    device: Optional[str] = None,
+) -> Tuple[np.ndarray, bool]:
+    """
+    Run YOLO11-seg crack prediction on a single BGR frame (e.g. one frame
+    pulled from a live camera/video source) and return an annotated copy.
+
+    This mirrors run_overlay() above - same mask-fill + contour-outline
+    drawing logic - but operates entirely in memory on a frame instead of
+    reading/writing an image file, so it's cheap enough to call on every
+    frame of a continuous video stream.
+
+    Returns:
+        (annotated_frame_bgr, crack_present) where crack_present is True
+        if at least one crack instance mask was found in this frame.
+    """
+    model = get_model(weights)
+
+    results = model.predict(
+        source=frame_bgr,
+        conf=conf,
+        imgsz=imgsz,
+        retina_masks=True,
+        device=device,
+        verbose=False,
+    )
+    result = results[0]
+
+    image = frame_bgr.copy()  # BGR
+    h, w = image.shape[:2]
+
+    if result.masks is None or len(result.masks) == 0:
+        return image, False
+
+    masks = result.masks.data.cpu().numpy()  # (N, H, W) in [0,1]
+    union = np.any(masks > 0.5, axis=0).astype(np.uint8)
+
+    if union.shape != (h, w):
+        union = cv2.resize(union, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    color_layer = np.zeros_like(image)
+    color_layer[:] = color
+    mask_bool = union.astype(bool)
+    blended = image.copy()
+    blended[mask_bool] = cv2.addWeighted(
+        image, 1 - alpha, color_layer, alpha, 0
+    )[mask_bool]
+
+    if outline > 0:
+        contours, _ = cv2.findContours(union, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(blended, contours, -1, color, outline)
+
+    return blended, True

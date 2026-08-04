@@ -5,7 +5,8 @@ REM Usage: double-click this file, or run it from a command prompt.
 REM
 REM Produces dist\Matanglawin.exe - a single file you can double-click
 REM with no Python installation required. It starts a local web server
-REM and opens your browser to the crack-detection website automatically.
+REM and opens your browser to the real-time crack-detection dashboard
+REM automatically.
 
 cd /d "%~dp0"
 

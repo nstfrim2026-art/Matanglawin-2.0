@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
-app.py - Matanglawin crack-detection web app.
+app.py - Matanglawin real-time drone-assisted crack detection dashboard.
 
-A small Flask website that lets a user upload a photo of a surface
-(road, wall, pipe, etc.), runs it through the trained YOLO11-seg model
-(best.pt) using the same overlay logic as infer_overlay.py, and shows
-the crack-mask overlay result in the browser.
+Flask routes ONLY. All video-source handling lives in video_source.py,
+all continuous inference lives in detector.py (which itself reuses the
+same YOLO11-seg model + overlay logic as inference_core.py), and the
+dashboard UI lives in templates/ + static/.
+
+Routes:
+    GET  /            Dashboard page (loading screen -> live dashboard).
+    GET  /video_feed  MJPEG stream of the annotated live camera feed.
+    GET  /status      JSON: {"camera_connected", "crack_present", "source"}.
+    POST /set_source   Body: {"source": "webcam"|"droidcam"|"drone"}.
+    GET  /sources     JSON list of available camera sources.
+    GET  /health      Basic health check (also confirms the model loads).
 
 Run locally:
     pip install -r requirements.txt
@@ -13,132 +21,105 @@ Run locally:
     -> open http://localhost:5000
 
 Environment variables (optional):
-    WEIGHTS   Path to the .pt weights file (default: best.pt)
-    PORT      Port to listen on (default: 5000)
+    WEIGHTS        Path to the .pt weights file (default: best.pt)
+    HOST           Host to bind to (default: 127.0.0.1)
+    PORT           Preferred port (default: 5000)
+    CONF            Detection confidence threshold (default: 0.25)
+    TARGET_FPS      Cap on inference loop rate (default: 8)
+    DEFAULT_SOURCE  "webcam" | "droidcam" | "drone" (default: webcam)
+    DROIDCAM_URL    e.g. http://192.168.1.50:4747/video
+    DRONE_URL       Placeholder URL/RTSP for a future drone camera feed
 """
 
 import os
 import sys
-import uuid
+import time
 from pathlib import Path
 
-from flask import Flask, render_template, request, url_for, flash, redirect, send_from_directory
-from werkzeug.utils import secure_filename
+from flask import Flask, Response, jsonify, render_template, request
 
-from inference_core import run_overlay, get_model
+from detector import Detector
+from inference_core import get_model
+from video_source import build_registry
 
 # ---------------------------------------------------------------------------
-# Resource paths.
-#
-# When this app is bundled into a one-file executable with PyInstaller, all
-# read-only resources (templates/, static/style.css, best.pt) are extracted
-# to a temporary directory exposed as `sys._MEIPASS`. That directory is
-# read-only for practical purposes, so anything the app *writes* at runtime
-# (uploaded images, result overlays) is instead stored in a separate,
-# writable directory next to the executable (or next to app.py in dev mode).
+# Resource paths (also supports being bundled into a one-file executable
+# with PyInstaller, where read-only resources are extracted to sys._MEIPASS).
 # ---------------------------------------------------------------------------
 if getattr(sys, "frozen", False):
-    RESOURCE_DIR = Path(sys._MEIPASS)          # read-only bundled files
-    APP_DIR = Path(sys.executable).resolve().parent  # writable, next to the .exe
+    RESOURCE_DIR = Path(sys._MEIPASS)
 else:
     RESOURCE_DIR = Path(__file__).resolve().parent
-    APP_DIR = RESOURCE_DIR
-
-DATA_DIR = APP_DIR / "matanglawin_data"
-UPLOAD_DIR = DATA_DIR / "uploads"
-RESULT_DIR = DATA_DIR / "results"
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
-ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB upload limit
+CONF = float(os.environ.get("CONF", 0.25))
+TARGET_FPS = float(os.environ.get("TARGET_FPS", 8))
+DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "webcam")
+DROIDCAM_URL = os.environ.get("DROIDCAM_URL", "http://192.168.1.50:4747/video")
+DRONE_URL = os.environ.get("DRONE_URL", "http://192.168.1.60:8080/video")
 
 app = Flask(
     __name__,
     template_folder=str(RESOURCE_DIR / "templates"),
     static_folder=str(RESOURCE_DIR / "static"),
 )
-app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
-app.secret_key = os.environ.get("SECRET_KEY", "matanglawin-dev-secret")
 
-
-@app.route("/data/uploads/<path:filename>")
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
-
-
-@app.route("/data/results/<path:filename>")
-def result_file(filename):
-    return send_from_directory(RESULT_DIR, filename)
-
-
-def allowed_file(filename: str) -> bool:
-    return Path(filename).suffix.lower() in ALLOWED_EXTS
+REGISTRY = build_registry(droidcam_url=DROIDCAM_URL, drone_url=DRONE_URL)
+detector = Detector(
+    registry=REGISTRY,
+    weights=WEIGHTS,
+    conf=CONF,
+    target_fps=TARGET_FPS,
+    default_source_key=DEFAULT_SOURCE if DEFAULT_SOURCE in REGISTRY else "webcam",
+)
 
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    return render_template("dashboard.html", sources=detector.available_sources())
 
 
-@app.route("/detect", methods=["POST"])
-def detect():
-    file = request.files.get("image")
-
-    if file is None or file.filename == "":
-        flash("Please choose an image file to upload.")
-        return redirect(url_for("index"))
-
-    if not allowed_file(file.filename):
-        flash("Unsupported file type. Please upload a JPG, PNG, BMP, TIF, or WEBP image.")
-        return redirect(url_for("index"))
-
-    # Read tuning options from the form, with sane defaults.
-    try:
-        conf = float(request.form.get("conf", 0.25))
-        alpha = float(request.form.get("alpha", 0.5))
-        outline = int(request.form.get("outline", 2))
-    except ValueError:
-        conf, alpha, outline = 0.25, 0.5, 2
-    conf = min(max(conf, 0.0), 1.0)
-    alpha = min(max(alpha, 0.0), 1.0)
-    outline = min(max(outline, 0), 10)
-
-    # Save the upload under a unique name to avoid collisions.
-    ext = Path(secure_filename(file.filename)).suffix.lower()
-    uid = uuid.uuid4().hex
-    upload_name = f"{uid}{ext}"
-    upload_path = UPLOAD_DIR / upload_name
-    file.save(upload_path)
-
-    result_name = f"{uid}_overlay.jpg"
-    result_path = RESULT_DIR / result_name
-
-    try:
-        info = run_overlay(
-            image_path=str(upload_path),
-            out_path=str(result_path),
-            weights=WEIGHTS,
-            conf=conf,
-            imgsz=640,
-            alpha=alpha,
-            color=(0, 0, 255),  # red, B,G,R
-            outline=outline,
+def _mjpeg_generator():
+    boundary = b"--frame"
+    while True:
+        jpeg = detector.get_latest_jpeg()
+        yield (
+            boundary
+            + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
+            + str(len(jpeg)).encode()
+            + b"\r\n\r\n"
+            + jpeg
+            + b"\r\n"
         )
-    except Exception as exc:  # noqa: BLE001 - surface the error to the user
-        flash(f"Inference failed: {exc}")
-        return redirect(url_for("index"))
+        time.sleep(0.05)
 
-    return render_template(
-        "result.html",
-        original_url=url_for("uploaded_file", filename=upload_name),
-        result_url=url_for("result_file", filename=result_name),
-        num_instances=info["num_instances"],
-        conf=conf,
-        alpha=alpha,
-        outline=outline,
+
+@app.route("/video_feed", methods=["GET"])
+def video_feed():
+    return Response(
+        _mjpeg_generator(),
+        mimetype="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+@app.route("/status", methods=["GET"])
+def status():
+    return jsonify(detector.get_status())
+
+
+@app.route("/sources", methods=["GET"])
+def sources():
+    return jsonify(detector.available_sources())
+
+
+@app.route("/set_source", methods=["POST"])
+def set_source():
+    payload = request.get_json(silent=True) or {}
+    source_key = payload.get("source", "")
+    ok = detector.set_source(source_key)
+    if not ok:
+        return jsonify({"ok": False, "error": "Unknown source"}), 400
+    return jsonify({"ok": True, "source": source_key})
 
 
 @app.route("/health", methods=["GET"])
@@ -171,23 +152,24 @@ def main():
     port = _find_free_port(preferred_port, host)
     url = f"http://{host}:{port}/"
 
+    detector.start()
+
     print("=" * 60)
-    print("  Matanglawin - Crack Detection")
+    print("  MATANGLAWIN - Real-Time Drone Visual Crack Detection")
     print(f"  Starting server at {url}")
     print("  Close this window to stop the app.")
     print("=" * 60)
 
-    # Open the default browser shortly after the server starts, but only
-    # when running as the packaged executable (or when explicitly asked
-    # to in dev mode via AUTO_OPEN=1), so `flask run`/debugging isn't
-    # interrupted by extra browser tabs on every auto-reload.
     if getattr(sys, "frozen", False) or os.environ.get("AUTO_OPEN") == "1":
         import threading
         import webbrowser
 
         threading.Timer(1.25, lambda: webbrowser.open(url)).start()
 
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    try:
+        app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
+    finally:
+        detector.stop()
 
 
 if __name__ == "__main__":

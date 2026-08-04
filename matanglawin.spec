@@ -20,11 +20,11 @@ ROOT = Path(".").resolve()
 datas = [
     (str(ROOT / "templates"), "templates"),
     (str(ROOT / "static" / "style.css"), "static"),
+    (str(ROOT / "static" / "img"), "static/img"),
+    (str(ROOT / "static" / "js"), "static/js"),
+    (str(ROOT / "static" / "sounds"), "static/sounds"),
     (str(ROOT / "best.pt"), "."),
 ]
-# static/uploads and static/results are write targets at runtime, not
-# bundled read-only resources - app.py creates a sibling writable
-# "matanglawin_data" folder next to the executable instead.
 
 datas += collect_data_files("ultralytics")
 

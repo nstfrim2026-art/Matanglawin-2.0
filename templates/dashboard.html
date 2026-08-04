@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MATANGLAWIN &mdash; Real-Time Drone Visual Crack Detection</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo-mark.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- Loading screen -->
+  <div id="loadingScreen" class="loading-screen">
+    <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="loading-logo">
+    <h1 class="loading-title">MATANGLAWIN</h1>
+    <p class="loading-subtitle">AI-Assisted Drone Visual Crack Detection System</p>
+    <p class="loading-status">Loading&hellip;</p>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard" class="dashboard">
+
+    <header class="topbar">
+      <div class="topbar-brand">
+        <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="brand-logo">
+        <div class="brand-text">
+          <span class="brand-title">MATANGLAWIN</span>
+          <span class="brand-subtitle">AI-Assisted Drone Visual Crack Detection System</span>
+        </div>
+      </div>
+      <div class="topbar-live">
+        <span id="liveDot" class="live-dot offline"></span>
+        <span id="liveLabel" class="live-label">LIVE</span>
+      </div>
+    </header>
+
+    <!-- Alert banner -->
+    <div id="alertBanner" class="alert-banner" role="alert" aria-hidden="true">
+      <span class="alert-icon">&#9888;</span>
+      <span>POTENTIAL CRACK DETECTED</span>
+    </div>
+
+    <main class="main-area">
+      <section class="video-panel">
+        <div class="video-frame">
+          <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live camera feed" class="video-stream">
+        </div>
+      </section>
+
+      <section class="status-panel">
+        <span class="status-label">STATUS</span>
+        <div id="statusIndicator" class="status-indicator monitoring">
+          <span class="status-dot"></span>
+          <span id="statusText" class="status-text">Monitoring&hellip;</span>
+        </div>
+      </section>
+
+      <section class="source-panel">
+        <span class="source-label">Camera Source</span>
+        <div class="source-options" id="sourceOptions">
+          {% for src in sources %}
+          <label class="source-option">
+            <input type="radio" name="source" value="{{ src.key }}" {{ 'checked' if loop.first else '' }}>
+            <span>{{ src.label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>MATANGLAWIN &mdash; Real-time visual crack detection &amp; visualization only.</span>
+    </footer>
+  </div>
+
+  <audio id="alertSound" src="{{ url_for('static', filename='sounds/alert.wav') }}" preload="auto"></audio>
+
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

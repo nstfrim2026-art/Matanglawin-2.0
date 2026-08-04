@@ -6,8 +6,8 @@
 #
 # Produces dist/Matanglawin - a single file you can double-click (or run
 # with `./dist/Matanglawin`) with no Python installation required. It
-# starts a local web server and opens your browser to the crack-detection
-# website automatically.
+# starts a local web server and opens your browser to the real-time
+# crack-detection dashboard automatically.
 #
 # On Windows, run the equivalent commands from build_exe.bat instead.
 
