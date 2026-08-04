@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+static/uploads/*
+static/results/*
+!static/uploads/.gitkeep
+!static/results/.gitkeep
+matanglawin_data/
+
+# PyInstaller build output
+build/
+dist/
+*.spec.bak
