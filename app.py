@@ -18,27 +18,59 @@ Environment variables (optional):
 """
 
 import os
+import sys
 import uuid
 from pathlib import Path
 
-from flask import Flask, render_template, request, url_for, flash, redirect
+from flask import Flask, render_template, request, url_for, flash, redirect, send_from_directory
 from werkzeug.utils import secure_filename
 
 from inference_core import run_overlay, get_model
 
-BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "static" / "uploads"
-RESULT_DIR = BASE_DIR / "static" / "results"
+# ---------------------------------------------------------------------------
+# Resource paths.
+#
+# When this app is bundled into a one-file executable with PyInstaller, all
+# read-only resources (templates/, static/style.css, best.pt) are extracted
+# to a temporary directory exposed as `sys._MEIPASS`. That directory is
+# read-only for practical purposes, so anything the app *writes* at runtime
+# (uploaded images, result overlays) is instead stored in a separate,
+# writable directory next to the executable (or next to app.py in dev mode).
+# ---------------------------------------------------------------------------
+if getattr(sys, "frozen", False):
+    RESOURCE_DIR = Path(sys._MEIPASS)          # read-only bundled files
+    APP_DIR = Path(sys.executable).resolve().parent  # writable, next to the .exe
+else:
+    RESOURCE_DIR = Path(__file__).resolve().parent
+    APP_DIR = RESOURCE_DIR
+
+DATA_DIR = APP_DIR / "matanglawin_data"
+UPLOAD_DIR = DATA_DIR / "uploads"
+RESULT_DIR = DATA_DIR / "results"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
-WEIGHTS = os.environ.get("WEIGHTS", str(BASE_DIR / "best.pt"))
+WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB upload limit
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=str(RESOURCE_DIR / "templates"),
+    static_folder=str(RESOURCE_DIR / "static"),
+)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.secret_key = os.environ.get("SECRET_KEY", "matanglawin-dev-secret")
+
+
+@app.route("/data/uploads/<path:filename>")
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_DIR, filename)
+
+
+@app.route("/data/results/<path:filename>")
+def result_file(filename):
+    return send_from_directory(RESULT_DIR, filename)
 
 
 def allowed_file(filename: str) -> bool:
@@ -100,8 +132,8 @@ def detect():
 
     return render_template(
         "result.html",
-        original_url=url_for("static", filename=f"uploads/{upload_name}"),
-        result_url=url_for("static", filename=f"results/{result_name}"),
+        original_url=url_for("uploaded_file", filename=upload_name),
+        result_url=url_for("result_file", filename=result_name),
         num_instances=info["num_instances"],
         conf=conf,
         alpha=alpha,
@@ -119,6 +151,44 @@ def health():
         return {"status": "error", "detail": str(exc)}, 500
 
 
+def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:
+    """Return `preferred` if free, otherwise ask the OS for any free port."""
+    import socket
+
+    for candidate in [preferred, 0]:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((host, candidate))
+                return s.getsockname()[1]
+            except OSError:
+                continue
+    raise RuntimeError("Could not find a free port")
+
+
+def main():
+    host = os.environ.get("HOST", "127.0.0.1")
+    preferred_port = int(os.environ.get("PORT", 5000))
+    port = _find_free_port(preferred_port, host)
+    url = f"http://{host}:{port}/"
+
+    print("=" * 60)
+    print("  Matanglawin - Crack Detection")
+    print(f"  Starting server at {url}")
+    print("  Close this window to stop the app.")
+    print("=" * 60)
+
+    # Open the default browser shortly after the server starts, but only
+    # when running as the packaged executable (or when explicitly asked
+    # to in dev mode via AUTO_OPEN=1), so `flask run`/debugging isn't
+    # interrupted by extra browser tabs on every auto-reload.
+    if getattr(sys, "frozen", False) or os.environ.get("AUTO_OPEN") == "1":
+        import threading
+        import webbrowser
+
+        threading.Timer(1.25, lambda: webbrowser.open(url)).start()
+
+    app.run(host=host, port=port, debug=False, use_reloader=False)
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    main()

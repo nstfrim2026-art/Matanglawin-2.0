@@ -3,3 +3,12 @@ ultralytics>=8.3
 opencv-python-headless>=4.9
 numpy>=1.26
 werkzeug>=3.0
+
+# NOTE: `ultralytics` depends on `torch`/`torchvision`. On a fresh install,
+# pip may pull the CUDA-enabled build of torch, which is several GB in size
+# and unnecessary for CPU-only inference on a single image. To keep the
+# install (and any PyInstaller build) small, install the CPU-only build
+# first:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
