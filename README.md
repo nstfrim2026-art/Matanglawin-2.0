@@ -39,6 +39,22 @@ window stops the app.
 > (a Linux build only runs on Linux, a Windows build only runs on
 > Windows, etc.) &mdash; PyInstaller does not cross-compile.
 
+### Get a live public link (hosted website)
+
+To put the site online with a shareable URL, deploy the included
+`Dockerfile` to **Hugging Face Spaces** (free, no credit card). Full
+step-by-step instructions are in [DEPLOY.md](DEPLOY.md). In short: create a
+free Hugging Face account, create a **Docker** Space, upload the project
+files, and it goes live at `https://<your-username>-matanglawin.hf.space`.
+
+You can also run the container anywhere Docker runs:
+
+```bash
+docker build -t matanglawin .
+docker run -p 7860:7860 matanglawin
+# open http://localhost:7860
+```
+
 ### Option B: Run from source with Python
 
 ```bash

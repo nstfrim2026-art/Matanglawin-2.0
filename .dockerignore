@@ -1,0 +1,9 @@
+venv/
+build/
+dist/
+__pycache__/
+*.pyc
+matanglawin_data/
+.git/
+static/uploads/*
+static/results/*
