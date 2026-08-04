@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Matanglawin — AI Crack Detection</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-icon">🦅</span>
+      <span class="brand-name">Matanglawin</span>
+      <span class="brand-tag">2.0</span>
+    </div>
+    <nav class="site-nav">
+      <a href="#detect">Detect</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#about">About</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>See cracks before they spread.</h1>
+      <p>
+        Matanglawin uses a YOLO11 instance-segmentation model to find surface
+        cracks in your photos and paint their exact contours &mdash; no bounding
+        boxes, just the real shape of the damage.
+      </p>
+      <a class="cta" href="#detect">Try it now ↓</a>
+    </section>
+
+    <section id="detect" class="detect-section">
+      <h2>Upload an image</h2>
+
+      <div class="panel">
+        <div class="upload-area" id="dropZone">
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <div id="uploadPrompt">
+            <p class="upload-icon">📷</p>
+            <p><strong>Click to choose</strong> or drag &amp; drop an image</p>
+            <p class="hint">JPG, PNG, WEBP supported</p>
+          </div>
+          <img id="previewImg" class="preview-img" hidden alt="Selected preview" />
+        </div>
+
+        <div class="controls">
+          <div class="control">
+            <label for="confRange">Confidence threshold: <span id="confVal">0.25</span></label>
+            <input type="range" id="confRange" min="0.05" max="0.95" step="0.05" value="0.25" />
+          </div>
+          <div class="control">
+            <label for="alphaRange">Overlay opacity: <span id="alphaVal">0.50</span></label>
+            <input type="range" id="alphaRange" min="0.1" max="1" step="0.05" value="0.5" />
+          </div>
+          <div class="control">
+            <label for="colorPick">Overlay color</label>
+            <input type="color" id="colorPick" value="#ff0000" />
+          </div>
+          <div class="control">
+            <label for="outlineRange">Outline thickness: <span id="outlineVal">2</span>px</label>
+            <input type="range" id="outlineRange" min="0" max="6" step="1" value="2" />
+          </div>
+          <button id="detectBtn" class="cta detect-btn" disabled>Detect cracks</button>
+        </div>
+      </div>
+
+      <div id="status" class="status" hidden></div>
+
+      <div id="resultPanel" class="result-panel" hidden>
+        <h3>Result</h3>
+        <p id="resultSummary"></p>
+        <img id="resultImg" alt="Detection result" />
+        <a id="downloadLink" class="cta secondary" download="matanglawin_overlay.png">Download result</a>
+      </div>
+    </section>
+
+    <section id="how-it-works" class="info-section">
+      <h2>How it works</h2>
+      <ol>
+        <li>Your image is sent to a backend running a trained YOLO11-seg model (<code>best.pt</code>).</li>
+        <li>The model predicts pixel-accurate crack masks (segmentation, not just boxes).</li>
+        <li>All predicted masks are merged and rendered as a semi-transparent fill plus a crisp
+          contour outline directly onto your original image.</li>
+        <li>You get back the overlay image and a count of detected crack instances.</li>
+      </ol>
+    </section>
+
+    <section id="about" class="info-section">
+      <h2>About this project</h2>
+      <p>
+        Matanglawin 2.0 is built around a YOLO11-seg model for crack segmentation, originally
+        driven by a local script (<code>infer_overlay.py</code>) that asks for an image and saves
+        an overlaid result. This website exposes the exact same detection logic through a simple
+        browser UI backed by a FastAPI service.
+      </p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Matanglawin 2.0 &mdash; crack segmentation demo.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
