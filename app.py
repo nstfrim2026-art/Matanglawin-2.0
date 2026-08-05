@@ -82,17 +82,21 @@ def index():
 
 def _mjpeg_generator():
     boundary = b"--frame"
-    while True:
-        jpeg = detector.get_latest_jpeg()
-        yield (
-            boundary
-            + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
-            + str(len(jpeg)).encode()
-            + b"\r\n\r\n"
-            + jpeg
-            + b"\r\n"
-        )
-        time.sleep(0.05)
+    try:
+        while True:
+            jpeg = detector.get_latest_jpeg()
+            yield (
+                boundary
+                + b"\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                + str(len(jpeg)).encode()
+                + b"\r\n\r\n"
+                + jpeg
+                + b"\r\n"
+            )
+            time.sleep(0.05)
+    except GeneratorExit:
+        # Client disconnected; clean up gracefully.
+        return
 
 
 @app.route("/video_feed", methods=["GET"])

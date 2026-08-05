@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address 5 review issues: MJPEG generator cleanup, resolution-dependent classification fix, rename severity to confidence, documentation drift, and MJPEG feed reconnection logic.",
+  "status": "in_progress",
+  "steps": [
+    "In app.py, wrap _mjpeg_generator() with try/except GeneratorExit (or try/finally) so it cleans up gracefully when a client disconnects.",
+    "In inference_core.py, change _classify_crack() to normalize by frame area instead of using absolute pixel thresholds. Pass (h, w) to the function and use area_ratio = area_px / (h * w). Use ratio-based thresholds: < 0.002 = Hairline, < 0.01 = Surface-Level, else Structural. Update the call site in annotate_frame() to pass h, w.",
+    "Rename the severity field to confidence throughout: inference_core.py dict key, dashboard.js display labels and variable references, templates/dashboard.html if applicable.",
+    "In README.md and DEPLOY.md, replace all references to DROIDCAM_URL with IP_CAMERA_URL, and DroidCam with IP Camera.",
+    "In static/js/dashboard.js, add MJPEG feed reconnection logic: when pollStatus detects the connection recovered (camera_connected goes from false to true), reset the video feed img src."
+  ],
+  "acceptance_criteria": [
+    "_mjpeg_generator() has a try/except GeneratorExit or try/finally block",
+    "_classify_crack() accepts h, w parameters and uses area_ratio normalization",
+    "No 'severity' key remains in inference_core.py metadata dict - replaced with 'confidence'",
+    "dashboard.js displays 'Confidence' instead of 'Severity' and references crack.confidence",
+    "README.md and DEPLOY.md have no references to DROIDCAM_URL or DroidCam",
+    "dashboard.js includes MJPEG reconnection logic triggered by camera_connected state change"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

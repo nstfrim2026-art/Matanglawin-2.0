@@ -85,11 +85,15 @@ def run_overlay(
     return {"num_instances": int(len(result.masks)), "out_path": str(out_path)}
 
 
-def _classify_crack(area_px: int) -> str:
-    """Classify a crack based on its mask pixel area."""
-    if area_px < 500:
+def _classify_crack(area_px: int, h: int, w: int) -> str:
+    """Classify a crack based on its mask area relative to total frame area."""
+    frame_area = h * w
+    if frame_area == 0:
         return "Hairline"
-    elif area_px < 2000:
+    area_ratio = area_px / frame_area
+    if area_ratio < 0.002:
+        return "Hairline"
+    elif area_ratio < 0.01:
         return "Surface-Level"
     else:
         return "Structural"
@@ -118,7 +122,7 @@ def annotate_frame(
         (annotated_frame_bgr, crack_present, crack_metadata_list) where
         crack_present is True if at least one crack instance mask was found
         in this frame, and crack_metadata_list is a list of dicts with
-        per-detection analysis (classification, severity, area, bbox,
+        per-detection analysis (classification, confidence, area, bbox,
         estimated length and width in pixels).
     """
     model = get_model(weights)
@@ -154,7 +158,7 @@ def annotate_frame(
         area_px = int(binary_mask.sum())
 
         # Confidence score from YOLO boxes
-        severity = float(result.boxes.conf[i].cpu().numpy())
+        confidence = float(result.boxes.conf[i].cpu().numpy())
 
         # Bounding box from YOLO boxes
         bbox = result.boxes.xyxy[i].cpu().numpy().tolist()
@@ -172,8 +176,8 @@ def annotate_frame(
             estimated_width_px = 0.0
 
         crack_metadata_list.append({
-            "classification": _classify_crack(area_px),
-            "severity": severity,
+            "classification": _classify_crack(area_px, h, w),
+            "confidence": confidence,
             "area_px": area_px,
             "bbox": bbox,
             "estimated_length_px": estimated_length_px,

@@ -29,9 +29,11 @@
   const sourceOptions = document.getElementById("sourceOptions");
   const navToggle = document.getElementById("navToggle");
   const navLinks = document.querySelectorAll(".nav-link");
+  const videoFeed = document.getElementById("videoFeed");
 
   let crackWasPresent = false;
   let loadingDismissed = false;
+  let cameraWasConnected = false;
 
   // -----------------------------------------------------------------------
   // Loading screen
@@ -98,6 +100,12 @@
     var cameraConnected = Boolean(data.camera_connected);
     var crackPresent = Boolean(data.crack_present);
 
+    // Reconnect MJPEG feed when camera recovers
+    if (cameraConnected && !cameraWasConnected && videoFeed) {
+      videoFeed.src = "/video_feed?" + Date.now();
+    }
+    cameraWasConnected = cameraConnected;
+
     // Live indicator
     if (liveDot) {
       if (cameraConnected) {
@@ -157,6 +165,7 @@
       if (!loadingDismissed) dismissLoading();
     } catch (err) {
       if (liveDot) liveDot.classList.remove("online");
+      cameraWasConnected = false;
     }
   }
 
@@ -164,9 +173,9 @@
   // Analysis polling
   // -----------------------------------------------------------------------
 
-  function getSeverityColor(severity) {
-    if (severity < 50) return "green";
-    if (severity < 75) return "yellow";
+  function getConfidenceColor(confidence) {
+    if (confidence < 50) return "green";
+    if (confidence < 75) return "yellow";
     return "red";
   }
 
@@ -190,12 +199,12 @@
 
     var html = "";
     cracks.forEach(function (crack) {
-      var severity = crack.severity || 0;
+      var confidence = (crack.confidence || 0) * 100;
       var classification = crack.classification || "Unknown";
       var area = crack.area_px || 0;
       var length = crack.estimated_length_px || 0;
       var width = crack.estimated_width_px || 0;
-      var colorClass = getSeverityColor(severity);
+      var colorClass = getConfidenceColor(confidence);
       var classClass = getClassificationClass(classification);
 
       html += '<div class="crack-entry">';
@@ -207,10 +216,10 @@
         "</span>";
       html += '<div class="severity-row">';
       html += '<div class="severity-label">';
-      html += "<span>Severity</span>";
+      html += "<span>Confidence</span>";
       html +=
         '<span class="severity-value">' +
-        Math.round(severity) +
+        Math.round(confidence) +
         "%</span>";
       html += "</div>";
       html += '<div class="severity-bar">';
@@ -218,7 +227,7 @@
         '<div class="severity-fill ' +
         colorClass +
         '" style="width: ' +
-        severity +
+        confidence +
         '%"></div>';
       html += "</div>";
       html += "</div>";

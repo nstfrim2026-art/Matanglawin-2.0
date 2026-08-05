@@ -1,7 +1,7 @@
 # MATANGLAWIN — Real-Time AI-Assisted Drone Visual Crack Detection System
 
 A real-time monitoring dashboard that continuously reads a live camera
-feed (laptop webcam, a phone running DroidCam, or in the future a
+feed (laptop webcam, a phone serving an IP camera stream, or in the future a
 drone's video downlink), runs every frame through the trained YOLO11-seg
 model (`best.pt`), and highlights visible cracks directly on the live
 video with a semi-transparent red overlay — no bounding boxes, no
@@ -27,7 +27,7 @@ open it from a browser on that same machine or local network.
 Kept intentionally separated per concern, so the video source can be
 swapped without ever touching the detection pipeline:
 
-- `video_source.py` — configurable camera abstraction (webcam / DroidCam
+- `video_source.py` — configurable camera abstraction (webcam / IP Camera
   / future drone feed), all opened the same way via OpenCV.
 - `inference_core.py` — the YOLO11-seg model + mask-overlay drawing
   logic, shared by the live dashboard, the original CLI script
@@ -70,15 +70,15 @@ Use the **Camera Source** selector at the bottom of the dashboard to
 switch between:
 
 - **Webcam** — your machine's default local camera (device index 0)
-- **DroidCam** — a phone running the DroidCam app, streamed over your
-  local Wi-Fi (default MJPEG URL: `http://<phone-ip>:4747/video`)
+- **IP Camera** — a phone or network camera serving an MJPEG/RTSP stream
+  over your local Wi-Fi (default URL: `http://<camera-ip>:4747/video`)
 - **Drone Camera** — a placeholder slot for the future drone video feed
 
 Configure the network camera URLs with environment variables before
 starting the app:
 
 ```bash
-export DROIDCAM_URL="http://192.168.1.50:4747/video"
+export IP_CAMERA_URL="http://192.168.1.50:4747/video"
 export DRONE_URL="http://192.168.1.60:8080/video"
 python app.py
 ```
@@ -90,7 +90,7 @@ python app.py
 - `PORT` — preferred port; a free one is chosen automatically if busy (default: `5000`)
 - `CONF` — detection confidence threshold (default: `0.25`)
 - `TARGET_FPS` — cap on the inference loop rate (default: `8`)
-- `DEFAULT_SOURCE` — `webcam` | `droidcam` | `drone` (default: `webcam`)
+- `DEFAULT_SOURCE` — `webcam` | `ip_camera` | `drone` (default: `webcam`)
 - `AUTO_OPEN` — set to `1` to auto-open the browser on startup in dev mode
 
 ## One-click executable (no Python required to *run* it)
@@ -116,7 +116,7 @@ docker run -p 5000:5000 --device=/dev/video0 matanglawin
 ```
 
 `--device=/dev/video0` passes the host's webcam into the container (Linux
-only). If you're only using a network camera source (DroidCam/drone
+only). If you're only using a network camera source (IP Camera/drone
 URL), you can drop that flag. See [DEPLOY.md](DEPLOY.md) for more detail.
 
 ## Files
