@@ -3,75 +3,175 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MATANGLAWIN &mdash; Real-Time Drone Visual Crack Detection</title>
+  <title>MATANGLAWIN - Real-Time Drone Visual Crack Detection</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo-mark.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
-  <!-- Loading screen -->
+  <!-- Loading Screen -->
   <div id="loadingScreen" class="loading-screen">
     <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="loading-logo">
     <h1 class="loading-title">MATANGLAWIN</h1>
-    <p class="loading-subtitle">AI-Assisted Drone Visual Crack Detection System</p>
-    <p class="loading-status">Loading&hellip;</p>
+    <p class="loading-status">Initializing System...</p>
   </div>
 
-  <!-- Dashboard -->
-  <div id="dashboard" class="dashboard">
-
-    <header class="topbar">
-      <div class="topbar-brand">
-        <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="brand-logo">
-        <div class="brand-text">
-          <span class="brand-title">MATANGLAWIN</span>
-          <span class="brand-subtitle">AI-Assisted Drone Visual Crack Detection System</span>
+  <!-- Navigation Bar -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-container">
+      <a href="#home" class="nav-brand">
+        <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="nav-logo">
+        <div class="nav-brand-text">
+          <span class="nav-brand-title">MATANGLAWIN</span>
+          <span class="nav-brand-tagline">SEE CRACKS. SAVE LIVES.</span>
         </div>
+      </a>
+      <input type="checkbox" id="navToggle" class="nav-toggle-checkbox" aria-label="Toggle navigation">
+      <label for="navToggle" class="nav-toggle-btn" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </label>
+      <div class="nav-links" id="navLinks">
+        <a href="#home" class="nav-link active">Home</a>
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#how-it-works" class="nav-link">How It Works</a>
+        <a href="#live-detection" class="nav-link">Live Feed</a>
+        <a href="#contact" class="nav-link">Contact</a>
+        <a href="#live-detection" class="nav-btn-cta">Get Started</a>
       </div>
-      <div class="topbar-live">
-        <span id="liveDot" class="live-dot offline"></span>
-        <span id="liveLabel" class="live-label">LIVE</span>
-      </div>
-    </header>
-
-    <!-- Alert banner -->
-    <div id="alertBanner" class="alert-banner" role="alert" aria-hidden="true">
-      <span class="alert-icon">&#9888;</span>
-      <span>POTENTIAL CRACK DETECTED</span>
     </div>
+  </nav>
 
-    <main class="main-area">
-      <section class="video-panel">
-        <div class="video-frame">
-          <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live camera feed" class="video-stream">
+  <!-- Hero Section -->
+  <section class="hero" id="home">
+    <div class="hero-container">
+      <div class="hero-content">
+        <h1 class="hero-headline">Observe. Detect. Protect.</h1>
+        <p class="hero-subtitle">AI-powered drone crack detection system that monitors infrastructure in real-time, identifies structural damage, and provides instant severity assessments to save lives.</p>
+        <a href="#live-detection" class="hero-cta">View Live Feed</a>
+      </div>
+      <div class="hero-visual">
+        <img src="{{ url_for('static', filename='img/drone-hero.svg') }}" alt="Drone illustration" class="hero-drone-img">
+        <div class="hero-status-badge" id="heroStatusBadge">
+          <span class="hero-badge-dot"></span>
+          <span class="hero-badge-text" id="heroBadgeText">MONITORING...</span>
         </div>
-      </section>
+      </div>
+    </div>
+  </section>
 
-      <section class="status-panel">
-        <span class="status-label">STATUS</span>
-        <div id="statusIndicator" class="status-indicator monitoring">
-          <span class="status-dot"></span>
-          <span id="statusText" class="status-text">Monitoring&hellip;</span>
+  <!-- Features Section -->
+  <section class="features-section" id="features">
+    <div class="section-container">
+      <h2 class="section-title">Key Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">
+            <img src="{{ url_for('static', filename='img/icon-observe.svg') }}" alt="Observation icon">
+          </div>
+          <h3 class="feature-card-title">Crack Observation</h3>
+          <p class="feature-card-desc">Real-time video feed from a drone-mounted camera enables continuous monitoring of structures, bridges, and buildings from any angle or altitude.</p>
         </div>
-      </section>
-
-      <section class="source-panel">
-        <span class="source-label">Camera Source</span>
-        <div class="source-options" id="sourceOptions">
-          {% for src in sources %}
-          <label class="source-option">
-            <input type="radio" name="source" value="{{ src.key }}" {{ 'checked' if loop.first else '' }}>
-            <span>{{ src.label }}</span>
-          </label>
-          {% endfor %}
+        <div class="feature-card">
+          <div class="feature-icon">
+            <img src="{{ url_for('static', filename='img/icon-detect.svg') }}" alt="Detection icon">
+          </div>
+          <h3 class="feature-card-title">Automatic Crack Detection</h3>
+          <p class="feature-card-desc">AI-powered analysis using YOLO11-seg provides instant crack classification, severity assessment, and dimensional measurements without human intervention.</p>
         </div>
-      </section>
-    </main>
+      </div>
+    </div>
+  </section>
 
-    <footer class="site-footer">
-      <span>MATANGLAWIN &mdash; Real-time visual crack detection &amp; visualization only.</span>
-    </footer>
-  </div>
+  <!-- How It Works Section -->
+  <section class="how-section" id="how-it-works">
+    <div class="section-container">
+      <h2 class="section-title">How Matanglawin Works</h2>
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-number">1</div>
+          <div class="step-icon">
+            <img src="{{ url_for('static', filename='img/icon-observe.svg') }}" alt="Observe">
+          </div>
+          <h3 class="step-title">Observe</h3>
+          <p class="step-desc">The drone captures high-resolution footage of infrastructure surfaces, streaming live video to the detection system.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">2</div>
+          <div class="step-icon">
+            <img src="{{ url_for('static', filename='img/icon-detect.svg') }}" alt="Detect">
+          </div>
+          <h3 class="step-title">Detect</h3>
+          <p class="step-desc">The AI model analyzes each frame in real-time, identifying and segmenting cracks with precision using deep learning.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-number">3</div>
+          <div class="step-icon">
+            <img src="{{ url_for('static', filename='img/icon-result.svg') }}" alt="Result">
+          </div>
+          <h3 class="step-title">Result</h3>
+          <p class="step-desc">Detailed reports with crack classification, severity percentage, and estimated dimensions are generated instantly for assessment.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live Detection Section -->
+  <section class="live-section" id="live-detection">
+    <div class="live-container">
+      <h2 class="live-section-title">Live Detection</h2>
+      <div class="live-grid">
+        <div class="live-feed-panel">
+          <div class="live-feed-header">
+            <span class="live-indicator" id="liveDot"></span>
+            <span class="live-indicator-text">LIVE FEED</span>
+          </div>
+          <div class="live-feed-frame">
+            <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live camera feed" class="live-feed-img">
+          </div>
+          <div class="source-selector">
+            <span class="source-label">Camera Source:</span>
+            <div class="source-options" id="sourceOptions">
+              {% for src in sources %}
+              <label class="source-option">
+                <input type="radio" name="source" value="{{ src.key }}" {{ 'checked' if loop.first else '' }}>
+                <span>{{ src.label }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="analysis-panel">
+          <div class="analysis-header">
+            <h3 class="analysis-title">Crack Analysis</h3>
+            <span class="analysis-status" id="analysisStatus">Monitoring</span>
+          </div>
+          <div class="analysis-content" id="analysisContent">
+            <div class="analysis-empty">
+              <p>No cracks detected - Monitoring...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact Section -->
+  <section class="contact-section" id="contact">
+    <div class="section-container">
+      <h2 class="section-title">Get In Touch</h2>
+      <p class="contact-text">Matanglawin is an AI-powered drone-assisted crack detection system designed to help keep infrastructure safe. For inquiries about deployment, partnerships, or technical details, reach out to our team.</p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin" class="footer-logo">
+      <span class="footer-brand">MATANGLAWIN</span>
+      <span class="footer-tagline">SEE CRACKS. SAVE LIVES.</span>
+      <span class="footer-copyright">&copy; 2025 Matanglawin. All rights reserved.</span>
+    </div>
+  </footer>
 
   <audio id="alertSound" src="{{ url_for('static', filename='sounds/alert.wav') }}" preload="auto"></audio>
 

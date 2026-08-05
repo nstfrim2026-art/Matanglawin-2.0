@@ -1,0 +1,7 @@
+{
+  "task_id": "task-crack-detection-redesign",
+  "task_description": "Complete redesign of Matanglawin crack detection web app: extend backend with crack analysis metadata, rename DroidCam to IP Camera, redesign frontend to match reference photo (white/light marketing site with red accents, multi-section layout), and add real-time analysis panel showing classification/severity/measurements.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

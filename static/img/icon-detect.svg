@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Magnifying glass / scanning icon -->
+  <circle cx="28" cy="28" r="14" fill="none" stroke="#d21f1f" stroke-width="3"/>
+  <line x1="38" y1="38" x2="52" y2="52" stroke="#d21f1f" stroke-width="4" stroke-linecap="round"/>
+  <!-- Scan lines inside -->
+  <line x1="20" y1="24" x2="36" y2="24" stroke="#d21f1f" stroke-width="1.5" opacity="0.6"/>
+  <line x1="20" y1="28" x2="36" y2="28" stroke="#d21f1f" stroke-width="1.5" opacity="0.6"/>
+  <line x1="20" y1="32" x2="36" y2="32" stroke="#d21f1f" stroke-width="1.5" opacity="0.6"/>
+</svg>

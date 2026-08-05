@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Eye icon -->
+  <path d="M32 16C18 16 8 32 8 32s10 16 24 16 24-16 24-16-10-16-24-16z" fill="none" stroke="#d21f1f" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32" cy="32" r="8" fill="none" stroke="#d21f1f" stroke-width="3"/>
+  <circle cx="32" cy="32" r="3" fill="#d21f1f"/>
+</svg>

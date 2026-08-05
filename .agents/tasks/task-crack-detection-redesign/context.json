@@ -1,0 +1,28 @@
+{
+  "project_type": "Flask web app with YOLO11-seg real-time crack detection",
+  "language": "Python (backend), HTML/CSS/JS (frontend)",
+  "build_system": "pip + requirements.txt, Dockerfile available",
+  "test_framework": "No automated tests present - manual verification via running the Flask app",
+  "build_command": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt",
+  "test_command": "source venv/bin/activate && python -c \"from app import app; client=app.test_client(); r=client.get('/health'); assert r.status_code==200, r.data\"",
+  "verification_instructions": "1. Activate venv. 2. Run python app.py. 3. Verify /health returns 200. 4. Verify /status returns JSON with expected fields. 5. Verify / serves the HTML page.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "dnf install -y mesa-libGL && python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu && pip install -r requirements.txt",
+  "environment_constraints": "OPEN_INTERNET network mode. No physical cameras available in sandbox. Python 3.9+ available. Must install mesa-libGL for OpenCV.",
+  "contribution_requirements": "No CONTRIBUTING.md found. Standard Python conventions.",
+  "key_patterns": "inference_core.py: get_model() caches YOLO model, annotate_frame() returns (frame, crack_present). detector.py: Detector class runs background thread, exposes get_latest_jpeg() and get_status(). video_source.py: build_registry() creates named sources with SourceSpec dataclass. app.py: Flask routes serve dashboard, MJPEG stream, JSON status.",
+  "relevant_files": [
+    "inference_core.py",
+    "detector.py",
+    "video_source.py",
+    "app.py",
+    "templates/dashboard.html",
+    "static/style.css",
+    "static/js/dashboard.js",
+    "static/img/logo-mark.svg",
+    "static/img/logo-full.svg",
+    "requirements.txt",
+    "Dockerfile"
+  ],
+  "directory_structure": "Root: app.py (Flask entry), detector.py (inference worker), inference_core.py (YOLO model logic), video_source.py (camera abstraction), best.pt (model weights). templates/dashboard.html (single page). static/style.css, static/js/dashboard.js, static/img/ (SVGs), static/sounds/alert.wav."
+}

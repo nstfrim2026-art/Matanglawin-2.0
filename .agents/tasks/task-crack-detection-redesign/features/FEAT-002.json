@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Complete frontend redesign to match the reference photo layout: white/light background, red accents, marketing-style website with navigation bar, hero section, feature cards, how-it-works section, live feed section with integrated analysis panel, and footer. Replace the dark monitoring dashboard with a professional multi-section landing page that integrates the live detection feed.",
+  "status": "in_progress",
+  "steps": [
+    "Rewrite templates/dashboard.html completely with the new structure: (1) Loading screen with logo animation, (2) Navigation bar with logo + 'MATANGLAWIN SEE CRACKS. SAVE LIVES.' tagline + nav links (Home, About, How It Works, Features, Contact as anchor links) + red 'Get Started' button, (3) Hero section with 'Observe. Detect. Protect.' headline, subtitle text about drone crack detection, and a hero image area showing a drone/detection visual with 'CRACK DETECTED' status badge, (4) Features section with cards: 'Crack Observation' and 'Automatic Crack Detection', (5) How It Works section with 3 steps (Observe, Detect, Result) shown as numbered cards, (6) Live Detection section with embedded MJPEG feed from /video_feed and the automatic analysis panel alongside it, (7) Footer with logo, tagline, and copyright. All sections should use anchor IDs for smooth scrolling from nav links.",
+    "Rewrite static/style.css completely: white (#ffffff) background, light grays (#f8f9fa, #f0f0f0) for section alternation, red (#d21f1f / #c81e2c) as the primary accent for buttons/highlights/headings, dark text (#1a1a1a, #333, #666) for readability. Use clean sans-serif typography (Inter or system fonts). Sections should have generous padding (80px+ vertical). Navigation should be fixed/sticky at top with white background and subtle shadow. Cards should have rounded corners, subtle shadows, hover effects. The live feed section should be a dark-themed panel (the monitoring area contrasts with the rest of the light page). Make the analysis panel a sidebar or below-feed panel with dark background showing crack classification, severity bars, and measurements. Fully responsive: mobile hamburger menu concept (can be CSS-only), stacked cards on mobile, feed goes full-width on small screens.",
+    "Rewrite static/js/dashboard.js completely: (1) Loading screen fade-out on DOMContentLoaded or after timeout, (2) Smooth scroll for nav anchor links, (3) Poll /status every 1 second - update the live indicator dot, the status badge on the hero section, and the alert state, (4) Poll /analysis every 1.5 seconds - update the analysis panel with crack classification, severity percentage bar, estimated dimensions, (5) Camera source selector - POST to /set_source on change, (6) Mobile nav toggle functionality, (7) Alert sound on crack detection rising edge (keep existing pattern). The analysis panel should display each detected crack as a card/row with: type classification, severity as a colored progress bar (green<50%, yellow 50-75%, red>75%), area in pixels, estimated length/width.",
+    "Add any placeholder/illustration SVGs needed in static/img/: a drone illustration SVG for the hero section (simple geometric drone silhouette), and step icons for the How It Works section (eye icon for Observe, gear/scan icon for Detect, checkmark/report icon for Result). Keep them minimal and on-brand with the red color."
+  ],
+  "acceptance_criteria": [
+    "The page at / serves a complete multi-section website matching the reference layout structure",
+    "Navigation bar has logo, tagline, nav links, and Get Started button",
+    "Hero section displays 'Observe. Detect. Protect.' headline with visual element",
+    "Features section shows at least 2 feature cards",
+    "How It Works section shows 3 steps",
+    "Live Detection section embeds the /video_feed MJPEG stream",
+    "Analysis panel displays crack classification, severity, and measurements from /analysis endpoint",
+    "Analysis panel updates automatically via polling (no manual refresh)",
+    "Camera source selector is present with IP Camera option (no DroidCam)",
+    "Design uses white/light background with red accents throughout",
+    "Page is responsive - works on mobile widths (320px+)",
+    "Loading screen appears and fades out",
+    "Alert sound plays on crack detection rising edge"
+  ],
+  "verification": [
+    "cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from app import app; c=app.test_client(); r=c.get('/'); assert r.status_code==200; html=r.data.decode(); assert 'Observe' in html and 'Detect' in html and 'Protect' in html, 'Missing hero headline'; assert 'How' in html and 'Works' in html, 'Missing how it works section'; assert '/video_feed' in html, 'Missing video feed embed'; assert '/analysis' in html or 'analysis' in html, 'Missing analysis reference'; assert 'IP Camera' in html or 'ip_camera' in html, 'Missing IP Camera option'; assert 'DroidCam' not in html and 'droidcam' not in html, 'DroidCam references remain'\"",
+    "cd /projects/sandbox/Matanglawin-2.0 && python -c \"import os; css=open('static/style.css').read(); assert '#ffffff' in css or '#fff' in css or 'white' in css, 'Missing white background'; assert '#d21f1f' in css or '#c81e2c' in css, 'Missing red accent color'\"",
+    "cd /projects/sandbox/Matanglawin-2.0 && python -c \"js=open('static/js/dashboard.js').read(); assert '/status' in js, 'Missing status polling'; assert '/analysis' in js, 'Missing analysis polling'; assert 'set_source' in js, 'Missing source selector'\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

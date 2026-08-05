@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="300" height="300">
+  <!-- Drone body center -->
+  <circle cx="150" cy="150" r="28" fill="#2a2a2a" stroke="#d21f1f" stroke-width="2"/>
+  <circle cx="150" cy="150" r="12" fill="#d21f1f" opacity="0.8"/>
+  <!-- Arms -->
+  <line x1="150" y1="150" x2="80" y2="80" stroke="#3a3a3a" stroke-width="6" stroke-linecap="round"/>
+  <line x1="150" y1="150" x2="220" y2="80" stroke="#3a3a3a" stroke-width="6" stroke-linecap="round"/>
+  <line x1="150" y1="150" x2="80" y2="220" stroke="#3a3a3a" stroke-width="6" stroke-linecap="round"/>
+  <line x1="150" y1="150" x2="220" y2="220" stroke="#3a3a3a" stroke-width="6" stroke-linecap="round"/>
+  <!-- Propellers -->
+  <circle cx="80" cy="80" r="30" fill="none" stroke="#d21f1f" stroke-width="2" opacity="0.6"/>
+  <circle cx="80" cy="80" r="20" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8 4"/>
+  <circle cx="80" cy="80" r="6" fill="#444"/>
+  <circle cx="220" cy="80" r="30" fill="none" stroke="#d21f1f" stroke-width="2" opacity="0.6"/>
+  <circle cx="220" cy="80" r="20" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8 4"/>
+  <circle cx="220" cy="80" r="6" fill="#444"/>
+  <circle cx="80" cy="220" r="30" fill="none" stroke="#d21f1f" stroke-width="2" opacity="0.6"/>
+  <circle cx="80" cy="220" r="20" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8 4"/>
+  <circle cx="80" cy="220" r="6" fill="#444"/>
+  <circle cx="220" cy="220" r="30" fill="none" stroke="#d21f1f" stroke-width="2" opacity="0.6"/>
+  <circle cx="220" cy="220" r="20" fill="none" stroke="#555" stroke-width="1.5" stroke-dasharray="8 4"/>
+  <circle cx="220" cy="220" r="6" fill="#444"/>
+  <!-- Camera lens -->
+  <circle cx="150" cy="150" r="6" fill="#1a1a1a" stroke="#d21f1f" stroke-width="1"/>
+</svg>
