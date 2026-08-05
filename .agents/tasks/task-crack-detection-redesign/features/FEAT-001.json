@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Extend backend to provide crack analysis metadata (classification, severity, measurements) and rename DroidCam to IP Camera. Modify inference_core.py to compute per-detection metrics, update detector.py to expose the metadata via get_status(), update video_source.py to rename droidcam to ip_camera, and add a /analysis endpoint to app.py.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In inference_core.py, modify annotate_frame() to return a third value: a list of crack analysis dicts. Each dict should contain: 'classification' (classify based on mask area: <500px='Hairline', <2000px='Surface-Level', else 'Structural'), 'severity' (confidence score from YOLO result.boxes.conf), 'area_px' (mask pixel count), 'bbox' (bounding box from result.boxes.xyxy), 'estimated_length_px' and 'estimated_width_px' (computed from contour bounding rect). Return signature becomes: (annotated_frame, crack_present, crack_metadata_list).",
     "In detector.py, update the Detector class: store the latest crack_metadata list from annotate_frame(), add it to get_status() response as 'cracks' key (list of dicts with classification, severity, area_px, estimated_length_px, estimated_width_px, bbox). Update the _run() method to capture the new third return value.",
@@ -23,5 +23,5 @@
     "cd /projects/sandbox/Matanglawin-2.0 && grep -r 'droidcam\\|DroidCam' *.py && echo 'FAIL: droidcam references remain' || echo 'PASS: no droidcam references'"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification tests pass. The ultralytics model loads correctly with CPU inference. No DroidCam references remain in Python files. The /analysis endpoint returns an empty JSON array when no cracks are detected (expected behavior with a black test frame)."
 }
