@@ -193,7 +193,7 @@ def capture_cooldown():
         return jsonify({"ok": False, "error": "Cooldown must be a number"}), 400
     cm = detector.get_capture_manager()
     if not cm.set_cooldown(cooldown):
-        return jsonify({"ok": False, "error": "Cooldown must be non-negative"}), 400
+        return jsonify({"ok": False, "error": "Cooldown must be at least 1.0 seconds"}), 400
     return jsonify({"ok": True, "cooldown": cm.get_cooldown()})
 
 

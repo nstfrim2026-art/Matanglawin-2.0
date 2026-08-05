@@ -170,7 +170,6 @@
 
   var STATE_LABELS = {
     monitoring: "Monitoring",
-    possible_crack: "Detecting...",
     threshold_reached: "Threshold Met",
     capturing: "Capturing...",
     analyzing: "Analyzing...",
@@ -202,7 +201,6 @@
     analysisStatus.classList.remove(
       "alert",
       "status-monitoring",
-      "status-detecting",
       "status-threshold",
       "status-capturing",
       "status-analyzing",
@@ -213,9 +211,6 @@
     switch (state) {
       case "monitoring":
         analysisStatus.classList.add("status-monitoring");
-        break;
-      case "possible_crack":
-        analysisStatus.classList.add("status-detecting");
         break;
       case "threshold_reached":
         analysisStatus.classList.add("alert", "status-threshold");

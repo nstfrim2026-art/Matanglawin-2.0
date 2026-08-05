@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address semantic review findings: fix blocking capture, unbounded storage, possible_crack dead zone, race condition, zero cooldown, invisible analysis_complete state, and capture count parsing bug.",
+  "status": "completed",
+  "steps": [
+    "1. Move _trigger_capture to a background thread so it does not block the detector loop.",
+    "2. Add a max captures limit (500) with rotation (delete oldest when exceeded).",
+    "3. Remove possible_crack intermediate state - transition directly from monitoring to capture when threshold is met.",
+    "4. Move file I/O inside the capture thread to eliminate race condition.",
+    "5. Enforce minimum cooldown of 1.0 second in set_cooldown.",
+    "6. Increase analysis_complete hold time to at least 2 seconds before transitioning to cooldown.",
+    "7. Use regex parsing in _scan_existing_captures to handle capture numbers above 9999.",
+    "8. Update dashboard.js to remove possible_crack state references from status display."
+  ],
+  "acceptance_criteria": [
+    "All Python modules import without errors",
+    "_trigger_capture runs in a background thread and does not block detector loop",
+    "Maximum 500 captures stored with oldest rotated out",
+    "No possible_crack state in the state machine - direct monitoring to threshold_reached transition",
+    "Cooldown minimum is 1.0 second",
+    "analysis_complete state holds for at least 2 seconds",
+    "Capture count correctly handles filenames with 5+ digit numbers",
+    "Existing functionality preserved"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"import app; import detector; import capture_manager; import inference_core; import video_source; print('All imports OK')\"",
+    "Run: python -c \"from capture_manager import CaptureManager; cm = CaptureManager('best.pt'); print('State:', cm.get_state()); print('Threshold:', cm.get_threshold()); print('Max captures:', cm._max_captures)\""
+  ],
+  "blocked_reason": null,
+  "findings": "All 8 review issues addressed. Issue #4 (analysis panel empty) is intentional per user requirements - no change needed. The possible_crack state was removed entirely, simplifying the state machine. Background thread approach prevents capture from blocking detector loop. CSS rule for status-detecting left in place (unused but harmless). Error message for cooldown updated to reflect minimum 1.0s requirement."
+}
