@@ -126,17 +126,6 @@
       }
     }
 
-    // Analysis status indicator
-    if (analysisStatus) {
-      if (crackPresent) {
-        analysisStatus.textContent = "Alert";
-        analysisStatus.classList.add("alert");
-      } else {
-        analysisStatus.textContent = "Monitoring";
-        analysisStatus.classList.remove("alert");
-      }
-    }
-
     // Alert sound on rising edge
     if (crackPresent && !crackWasPresent) {
       playAlertSound();
@@ -170,8 +159,24 @@
   }
 
   // -----------------------------------------------------------------------
-  // Analysis polling
+  // Capture status polling (replaces old /analysis polling)
   // -----------------------------------------------------------------------
+
+  const thresholdSlider = document.getElementById("thresholdSlider");
+  const thresholdLabel = document.getElementById("thresholdLabel");
+
+  let lastCaptureTimestamp = null;
+  let alertFiredForCapture = false;
+
+  var STATE_LABELS = {
+    monitoring: "Monitoring",
+    possible_crack: "Detecting...",
+    threshold_reached: "Threshold Met",
+    capturing: "Capturing...",
+    analyzing: "Analyzing...",
+    analysis_complete: "Complete",
+    cooldown: "Cooldown"
+  };
 
   function getConfidenceColor(confidence) {
     if (confidence < 50) return "green";
@@ -188,75 +193,156 @@
     return "structural";
   }
 
-  function renderAnalysis(cracks) {
+  function updateAnalysisStatus(state) {
+    if (!analysisStatus) return;
+    var label = STATE_LABELS[state] || "Monitoring";
+    analysisStatus.textContent = label;
+
+    // Remove all state classes
+    analysisStatus.classList.remove(
+      "alert",
+      "status-monitoring",
+      "status-detecting",
+      "status-threshold",
+      "status-capturing",
+      "status-analyzing",
+      "status-complete",
+      "status-cooldown"
+    );
+
+    switch (state) {
+      case "monitoring":
+        analysisStatus.classList.add("status-monitoring");
+        break;
+      case "possible_crack":
+        analysisStatus.classList.add("status-detecting");
+        break;
+      case "threshold_reached":
+        analysisStatus.classList.add("alert", "status-threshold");
+        break;
+      case "capturing":
+        analysisStatus.classList.add("alert", "status-capturing");
+        break;
+      case "analyzing":
+        analysisStatus.classList.add("status-analyzing");
+        break;
+      case "analysis_complete":
+        analysisStatus.classList.add("status-complete");
+        break;
+      case "cooldown":
+        analysisStatus.classList.add("status-cooldown");
+        break;
+    }
+  }
+
+  function renderCaptureAnalysis(analysis) {
     if (!analysisContent) return;
 
-    if (!cracks || cracks.length === 0) {
-      analysisContent.innerHTML =
-        '<div class="analysis-empty"><p>No cracks detected - Monitoring...</p></div>';
-      return;
-    }
+    var confidence = (analysis.confidence || 0) * 100;
+    var classification = analysis.classification || "Unknown";
+    var area = analysis.area_px || 0;
+    var length = analysis.estimated_length_px || 0;
+    var width = analysis.estimated_width_px || 0;
+    var timestamp = analysis.timestamp || "";
+    var colorClass = getConfidenceColor(confidence);
+    var classClass = getClassificationClass(classification);
 
     var html = "";
-    cracks.forEach(function (crack) {
-      var confidence = (crack.confidence || 0) * 100;
-      var classification = crack.classification || "Unknown";
-      var area = crack.area_px || 0;
-      var length = crack.estimated_length_px || 0;
-      var width = crack.estimated_width_px || 0;
-      var colorClass = getConfidenceColor(confidence);
-      var classClass = getClassificationClass(classification);
-
-      html += '<div class="crack-entry">';
+    html += '<div class="capture-image-container">';
+    html +=
+      '<img class="capture-image" src="/capture/image?t=' +
+      encodeURIComponent(timestamp) +
+      '" alt="Captured crack analysis">';
+    html += "</div>";
+    html += '<div class="crack-entry">';
+    html +=
+      '<span class="crack-classification ' +
+      classClass +
+      '">' +
+      classification +
+      "</span>";
+    html += '<div class="severity-row">';
+    html += '<div class="severity-label">';
+    html += "<span>Confidence</span>";
+    html +=
+      '<span class="severity-value">' +
+      Math.round(confidence) +
+      "%</span>";
+    html += "</div>";
+    html += '<div class="severity-bar">';
+    html +=
+      '<div class="severity-fill ' +
+      colorClass +
+      '" style="width: ' +
+      confidence +
+      '%"></div>';
+    html += "</div>";
+    html += "</div>";
+    html += '<div class="crack-dimensions">';
+    html +=
+      '<span class="crack-dim-item">Length: <span>' +
+      Math.round(length) +
+      "px</span></span>";
+    html +=
+      '<span class="crack-dim-item">Width: <span>' +
+      Math.round(width) +
+      "px</span></span>";
+    html +=
+      '<span class="crack-dim-item">Area: <span>' +
+      Math.round(area) +
+      "px</span></span>";
+    html += "</div>";
+    if (timestamp) {
       html +=
-        '<span class="crack-classification ' +
-        classClass +
-        '">' +
-        classification +
-        "</span>";
-      html += '<div class="severity-row">';
-      html += '<div class="severity-label">';
-      html += "<span>Confidence</span>";
-      html +=
-        '<span class="severity-value">' +
-        Math.round(confidence) +
-        "%</span>";
-      html += "</div>";
-      html += '<div class="severity-bar">';
-      html +=
-        '<div class="severity-fill ' +
-        colorClass +
-        '" style="width: ' +
-        confidence +
-        '%"></div>';
-      html += "</div>";
-      html += "</div>";
-      html += '<div class="crack-dimensions">';
-      html +=
-        '<span class="crack-dim-item">Length: <span>' +
-        Math.round(length) +
-        "px</span></span>";
-      html +=
-        '<span class="crack-dim-item">Width: <span>' +
-        Math.round(width) +
-        "px</span></span>";
-      html +=
-        '<span class="crack-dim-item">Area: <span>' +
-        Math.round(area) +
-        "px</span></span>";
-      html += "</div>";
-      html += "</div>";
-    });
+        '<div class="capture-timestamp">Captured: ' +
+        timestamp +
+        "</div>";
+    }
+    html += "</div>";
 
     analysisContent.innerHTML = html;
   }
 
   async function pollAnalysis() {
     try {
-      var res = await fetch("/analysis", { cache: "no-store" });
+      var res = await fetch("/capture/status", { cache: "no-store" });
       if (!res.ok) throw new Error("bad response");
       var data = await res.json();
-      renderAnalysis(data);
+
+      var state = data.state || "monitoring";
+      updateAnalysisStatus(state);
+
+      // Trigger alert sound on threshold_reached or capturing (rising edge)
+      if (
+        (state === "threshold_reached" || state === "capturing") &&
+        !alertFiredForCapture
+      ) {
+        playAlertSound();
+        alertFiredForCapture = true;
+      }
+      if (state === "monitoring" || state === "cooldown") {
+        alertFiredForCapture = false;
+      }
+
+      // Render capture results or empty state
+      if (state === "analysis_complete" && data.latest_analysis) {
+        var ts = data.latest_analysis.timestamp;
+        if (ts !== lastCaptureTimestamp) {
+          lastCaptureTimestamp = ts;
+          renderCaptureAnalysis(data.latest_analysis);
+        }
+      } else if (
+        state !== "analysis_complete" &&
+        !lastCaptureTimestamp
+      ) {
+        // No capture has occurred yet - show monitoring state
+        if (analysisContent) {
+          analysisContent.innerHTML =
+            '<div class="analysis-empty"><p>No cracks detected - Monitoring...</p></div>';
+        }
+      }
+      // If a previous capture exists but state is not analysis_complete,
+      // keep the last analysis displayed (fixed until next capture)
     } catch (err) {
       /* ignore - status polling will handle connectivity */
     }
@@ -285,6 +371,31 @@
   }
 
   // -----------------------------------------------------------------------
+  // Threshold slider
+  // -----------------------------------------------------------------------
+
+  function setupThresholdSlider() {
+    if (!thresholdSlider || !thresholdLabel) return;
+
+    thresholdSlider.addEventListener("input", function () {
+      thresholdLabel.textContent = thresholdSlider.value + "%";
+    });
+
+    thresholdSlider.addEventListener("change", async function () {
+      var value = parseFloat(thresholdSlider.value) / 100;
+      try {
+        await fetch("/capture/threshold", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ threshold: value }),
+        });
+      } catch (err) {
+        /* ignore */
+      }
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // Mobile nav toggle
   // -----------------------------------------------------------------------
 
@@ -301,6 +412,7 @@
   function init() {
     setupSmoothScroll();
     setupSourceSelector();
+    setupThresholdSlider();
     setupMobileNav();
 
     // Start polling
