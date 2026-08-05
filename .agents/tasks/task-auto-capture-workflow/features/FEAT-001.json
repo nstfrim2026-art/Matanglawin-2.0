@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Implement the auto-capture backend: extend detector.py with a state machine for the two-stage pipeline (monitoring -> capture -> analysis -> cooldown -> resume), add capture storage to captures/ directory, add new Flask API endpoints for threshold control and capture data, and update .gitignore.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. Add 'captures/' to .gitignore (one line addition).",
     "2. Create a new module 'capture_manager.py' at the project root that handles: (a) configurable confidence threshold (default 0.85, range 0.50-1.00), (b) configurable cooldown period (default 5 seconds), (c) state machine with states: 'monitoring', 'possible_crack', 'threshold_reached', 'capturing', 'analyzing', 'analysis_complete', 'cooldown', (d) capture storage - saves images as captures/crack_NNNN.jpg and metadata as captures/crack_NNNN.json, (e) stores the latest captured+annotated image as JPEG bytes and the analysis metadata for the frontend to display, (f) a method that detector.py calls on each frame with the crack_metadata_list to check if any detection meets the threshold, (g) when threshold is met: saves the raw frame as a high-quality JPEG (quality 95), runs annotate_frame() on the captured image to produce the full analysis, stores the annotated image + metadata, transitions through states with appropriate timing, (h) thread-safe access to all state via a threading lock.",
@@ -27,5 +27,5 @@
     "Run: grep 'captures/' .gitignore"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All imports verified. State machine tested end-to-end including file saves. Flask routes tested with test client (status codes, validation). captures/ directory auto-created on first capture. Existing endpoints confirmed unchanged."
 }
