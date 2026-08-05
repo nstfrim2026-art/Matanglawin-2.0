@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Complete frontend redesign to match the reference photo layout: white/light background, red accents, marketing-style website with navigation bar, hero section, feature cards, how-it-works section, live feed section with integrated analysis panel, and footer. Replace the dark monitoring dashboard with a professional multi-section landing page that integrates the live detection feed.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Rewrite templates/dashboard.html completely with the new structure: (1) Loading screen with logo animation, (2) Navigation bar with logo + 'MATANGLAWIN SEE CRACKS. SAVE LIVES.' tagline + nav links (Home, About, How It Works, Features, Contact as anchor links) + red 'Get Started' button, (3) Hero section with 'Observe. Detect. Protect.' headline, subtitle text about drone crack detection, and a hero image area showing a drone/detection visual with 'CRACK DETECTED' status badge, (4) Features section with cards: 'Crack Observation' and 'Automatic Crack Detection', (5) How It Works section with 3 steps (Observe, Detect, Result) shown as numbered cards, (6) Live Detection section with embedded MJPEG feed from /video_feed and the automatic analysis panel alongside it, (7) Footer with logo, tagline, and copyright. All sections should use anchor IDs for smooth scrolling from nav links.",
     "Rewrite static/style.css completely: white (#ffffff) background, light grays (#f8f9fa, #f0f0f0) for section alternation, red (#d21f1f / #c81e2c) as the primary accent for buttons/highlights/headings, dark text (#1a1a1a, #333, #666) for readability. Use clean sans-serif typography (Inter or system fonts). Sections should have generous padding (80px+ vertical). Navigation should be fixed/sticky at top with white background and subtle shadow. Cards should have rounded corners, subtle shadows, hover effects. The live feed section should be a dark-themed panel (the monitoring area contrasts with the rest of the light page). Make the analysis panel a sidebar or below-feed panel with dark background showing crack classification, severity bars, and measurements. Fully responsive: mobile hamburger menu concept (can be CSS-only), stacked cards on mobile, feed goes full-width on small screens.",
@@ -30,5 +30,5 @@
     "cd /projects/sandbox/Matanglawin-2.0 && python -c \"js=open('static/js/dashboard.js').read(); assert '/status' in js, 'Missing status polling'; assert '/analysis' in js, 'Missing analysis polling'; assert 'set_source' in js, 'Missing source selector'\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification checks pass. Template renders at / with 200 status. CSS has required red accent and white background. JS includes /status polling, /analysis polling, and set_source handling. No DroidCam references anywhere in frontend. All SVG assets accessible via static file serving. Health endpoint returns 200."
 }
