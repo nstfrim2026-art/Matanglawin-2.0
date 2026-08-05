@@ -2,6 +2,7 @@ venv/
 __pycache__/
 *.pyc
 matanglawin_data/
+captures/
 
 # PyInstaller build output
 build/

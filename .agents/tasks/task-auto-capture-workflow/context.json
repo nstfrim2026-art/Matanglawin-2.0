@@ -1,0 +1,25 @@
+{
+  "project_type": "Python Flask web app with YOLO11-seg real-time crack detection",
+  "language": "Python (backend), vanilla JavaScript (frontend)",
+  "build_system": "pip with requirements.txt, Docker optional",
+  "test_framework": "No existing test suite. Validation via import check and syntax verification.",
+  "build_command": "python -c \"import app; import detector; import inference_core; import video_source; print('OK')\"",
+  "test_command": "python -c \"import app; import detector; import inference_core; import video_source; print('All imports OK')\"",
+  "verification_instructions": "1. Run python -c to verify all modules import without errors. 2. Check that new endpoints respond (start app briefly or verify via code review). 3. Verify captures/ directory creation logic. 4. Verify .gitignore includes captures/.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q && pip install -r requirements.txt -q",
+  "environment_constraints": "OPEN_INTERNET network mode. mesa-libGL already installed. No live camera available for integration testing - validation is code-level only.",
+  "contribution_requirements": "Do NOT modify existing website layout, UI, navigation, styling, or current functionality unless required for the new feature. This is an additional feature only. Use vanilla JS (no frameworks). Keep architecture separation: video_source.py, inference_core.py, detector.py, app.py.",
+  "key_patterns": "1. detector.py owns background thread, stores latest JPEG + status in memory with threading lock. 2. app.py exposes Flask routes that read from detector. 3. inference_core.annotate_frame() returns (annotated_frame, crack_present, crack_metadata_list). 4. Each crack_metadata has: classification, confidence (float 0-1), area_px, bbox, estimated_length_px, estimated_width_px. 5. dashboard.js polls /status every 1s and /analysis every 1.5s. 6. Frontend uses class-based styling in static/style.css with dark theme in live-detection section.",
+  "relevant_files": [
+    "detector.py",
+    "app.py",
+    "inference_core.py",
+    "video_source.py",
+    "templates/dashboard.html",
+    "static/js/dashboard.js",
+    "static/style.css",
+    ".gitignore"
+  ],
+  "directory_structure": "Root: app.py (Flask routes), detector.py (background worker), inference_core.py (YOLO model + annotation), video_source.py (camera abstraction), best.pt (model weights). templates/dashboard.html (single page). static/style.css, static/js/dashboard.js, static/img/ (SVGs), static/sounds/ (alert.wav)."
+}

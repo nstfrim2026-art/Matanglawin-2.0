@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Implement the auto-capture backend: extend detector.py with a state machine for the two-stage pipeline (monitoring -> capture -> analysis -> cooldown -> resume), add capture storage to captures/ directory, add new Flask API endpoints for threshold control and capture data, and update .gitignore.",
+  "status": "in_progress",
+  "steps": [
+    "1. Add 'captures/' to .gitignore (one line addition).",
+    "2. Create a new module 'capture_manager.py' at the project root that handles: (a) configurable confidence threshold (default 0.85, range 0.50-1.00), (b) configurable cooldown period (default 5 seconds), (c) state machine with states: 'monitoring', 'possible_crack', 'threshold_reached', 'capturing', 'analyzing', 'analysis_complete', 'cooldown', (d) capture storage - saves images as captures/crack_NNNN.jpg and metadata as captures/crack_NNNN.json, (e) stores the latest captured+annotated image as JPEG bytes and the analysis metadata for the frontend to display, (f) a method that detector.py calls on each frame with the crack_metadata_list to check if any detection meets the threshold, (g) when threshold is met: saves the raw frame as a high-quality JPEG (quality 95), runs annotate_frame() on the captured image to produce the full analysis, stores the annotated image + metadata, transitions through states with appropriate timing, (h) thread-safe access to all state via a threading lock.",
+    "3. Modify detector.py: after annotate_frame() is called on the live frame, pass the raw frame and crack_metadata_list to capture_manager's check method. The detector continues its normal loop (live feed stays running). Add a method get_capture_status() that returns the capture manager's current state, latest captured image, and analysis results. The existing get_status() and get_latest_jpeg() remain unchanged - live feed behavior is preserved.",
+    "4. Add new Flask routes in app.py: (a) GET /capture/status - returns JSON with current workflow state, latest capture analysis (metadata, timestamp, confidence, classification), and threshold settings. (b) POST /capture/threshold - accepts JSON {threshold: float} to update the confidence threshold (validate 0.50-1.00). (c) GET /capture/image - returns the latest captured+annotated image as JPEG (for display in analysis panel). (d) GET /capture/cooldown - accepts JSON {cooldown: float} to update cooldown seconds. (e) POST /capture/reset - resets state back to monitoring.",
+    "5. The capture metadata JSON file (captures/crack_NNNN.json) should contain: timestamp (ISO 8601), image_filename, classification, confidence, estimated_length_px, estimated_width_px, area_px, bbox, and the full crack_metadata_list (since a frame may have multiple cracks)."
+  ],
+  "acceptance_criteria": [
+    "All Python modules import without errors: python -c 'import app; import detector; import capture_manager; import inference_core; import video_source'",
+    "captures/ directory is created automatically on first capture (os.makedirs with exist_ok=True)",
+    "captures/ is in .gitignore",
+    "The capture_manager state machine correctly transitions through all states",
+    "The confidence threshold is configurable via POST /capture/threshold and persists in memory",
+    "The cooldown prevents duplicate captures within the configured period",
+    "The existing /status, /video_feed, /analysis, /set_source, /sources, /health endpoints remain unchanged in behavior",
+    "High-quality JPEG capture (quality 95) is saved to captures/ with incrementing filenames",
+    "Metadata JSON is saved alongside each captured image"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"import app; import detector; import capture_manager; import inference_core; import video_source; print('All imports OK')\"",
+    "Run: python -c \"from capture_manager import CaptureManager; cm = CaptureManager('best.pt'); print('State:', cm.get_state()); print('Threshold:', cm.get_threshold())\"",
+    "Run: grep 'captures/' .gitignore"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

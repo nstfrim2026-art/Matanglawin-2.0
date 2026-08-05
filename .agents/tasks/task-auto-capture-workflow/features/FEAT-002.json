@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement the frontend changes: add threshold slider control to the live detection section, modify the analysis panel to show captured image analysis (fixed, not live-updating), display status flow progression, and add capture timestamp display. Minimize changes to existing layout/styling - only add new elements within the existing live-detection section.",
+  "status": "pending",
+  "steps": [
+    "1. Modify templates/dashboard.html: (a) Add a threshold control row in the live-feed-panel (below the source-selector), containing a range slider (50-100, default 85, step 1) with a percentage label. Style it to match the existing dark theme source-selector area. (b) Add a cooldown display or small status indicator near the threshold slider. Keep it minimal.",
+    "2. Modify static/js/dashboard.js: (a) Change the analysis polling from GET /analysis to GET /capture/status. The analysis panel now shows the CAPTURED image analysis (fixed) rather than continuously updating from live frames. (b) When capture/status returns analysis data (state is 'analysis_complete'), render the captured image (from /capture/image) and the analysis metadata (classification, confidence, dimensions, timestamp) in the analysis panel. The display remains fixed until another capture occurs. (c) When no capture has occurred yet or state is 'monitoring', show the current 'Monitoring...' empty state as before. (d) Add status flow display: show the current workflow state in the analysis-status element, cycling through: 'Monitoring...', 'Possible crack detected...', 'Confidence threshold reached', 'Capturing image...', 'Analyzing captured image...', 'Analysis Complete', 'Cooldown - Resume soon'. (e) Add event listener for the threshold slider: on change, POST to /capture/threshold with the new value. (f) Keep the existing /status polling for hero badge and live indicator unchanged. (g) The alert sound should still trigger on crack detection (when capture state transitions to threshold_reached or capturing).",
+    "3. Modify static/style.css: Add minimal CSS for: (a) the threshold slider control area (dark theme, matching source-selector styling), (b) the captured image display within analysis panel (img element that shows the annotated capture), (c) status flow text styling (subtle color changes per state), (d) capture timestamp display. Keep all additions scoped to the live-section/.live-* namespace. Do NOT modify any existing CSS rules.",
+    "4. The captured image in the analysis panel should be displayed as an <img> tag that loads /capture/image, with the analysis metadata (classification badge, confidence bar, dimensions, timestamp) displayed below it in the same crack-entry card format already used.",
+    "5. The threshold slider should immediately reflect in the backend (fire POST on input/change event) and show the current value as a percentage label next to it."
+  ],
+  "acceptance_criteria": [
+    "The threshold slider appears in the live detection section below the camera source selector",
+    "Moving the slider POSTs to /capture/threshold and updates the displayed percentage",
+    "The analysis panel shows 'Monitoring...' when no capture has occurred",
+    "When a capture completes, the analysis panel shows the captured annotated image and fixed metadata",
+    "The analysis panel does NOT continuously update from live frames anymore - it only updates on new captures",
+    "The status flow text updates to reflect current workflow state (monitoring, capturing, analyzing, etc.)",
+    "The capture timestamp is displayed when analysis is complete",
+    "All existing functionality preserved: live feed, hero badge, live indicator, source selector, alert sound, navigation, layout",
+    "No existing CSS rules are modified - only new rules added",
+    "The HTML structure of sections outside live-detection is untouched"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"import app; print('App imports OK')\"",
+    "Run: grep -c 'capture/threshold' static/js/dashboard.js (should be >= 1)",
+    "Run: grep -c 'capture/status' static/js/dashboard.js (should be >= 1)",
+    "Run: grep -c 'capture/image' static/js/dashboard.js (should be >= 1)",
+    "Run: grep -c 'threshold' templates/dashboard.html (should be >= 1)",
+    "Run: python -c \"from app import app; client = app.test_client(); r = client.get('/capture/status'); print(r.status_code, r.get_json())\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

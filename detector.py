@@ -24,6 +24,7 @@ from typing import Optional
 
 import cv2
 
+from capture_manager import CaptureManager
 from inference_core import annotate_frame
 from video_source import VideoSource, placeholder_frame
 
@@ -57,6 +58,13 @@ class Detector:
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
+        # Capture manager for auto-capture workflow
+        self._capture_manager = CaptureManager(
+            weights=weights,
+            conf=conf,
+            imgsz=imgsz,
+        )
+
     # -- lifecycle ----------------------------------------------------
     def start(self) -> None:
         self._thread.start()
@@ -89,6 +97,10 @@ class Detector:
         return [
             {"key": s.key, "label": s.label} for s in self._registry.values()
         ]
+
+    def get_capture_manager(self) -> CaptureManager:
+        """Return the capture manager instance for use by Flask routes."""
+        return self._capture_manager
 
     # -- internal worker loop -------------------------------------------
     def _run(self) -> None:
@@ -127,6 +139,13 @@ class Detector:
                 self._camera_connected = True
                 self._crack_present = crack_present
                 self._crack_metadata = crack_metadata
+
+            # Pass raw frame and metadata to the capture manager for
+            # automatic capture workflow (non-blocking state machine check)
+            try:
+                self._capture_manager.process_frame(frame, crack_metadata)
+            except Exception:
+                pass  # Never let capture logic break the live feed
 
             elapsed = time.monotonic() - loop_start
             remaining = self._min_frame_interval - elapsed

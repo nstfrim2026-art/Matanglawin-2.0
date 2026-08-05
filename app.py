@@ -142,6 +142,69 @@ def health():
         return {"status": "error", "detail": str(exc)}, 500
 
 
+# ---------------------------------------------------------------------------
+# Capture workflow endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/capture/status", methods=["GET"])
+def capture_status():
+    """Return the current capture workflow state and latest analysis."""
+    cm = detector.get_capture_manager()
+    return jsonify(cm.get_capture_status())
+
+
+@app.route("/capture/threshold", methods=["POST"])
+def capture_threshold():
+    """Update the auto-capture confidence threshold (0.50 - 1.00)."""
+    payload = request.get_json(silent=True) or {}
+    threshold = payload.get("threshold")
+    if threshold is None:
+        return jsonify({"ok": False, "error": "Missing 'threshold' field"}), 400
+    try:
+        threshold = float(threshold)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Threshold must be a number"}), 400
+    cm = detector.get_capture_manager()
+    if not cm.set_threshold(threshold):
+        return jsonify({"ok": False, "error": "Threshold must be between 0.50 and 1.00"}), 400
+    return jsonify({"ok": True, "threshold": cm.get_threshold()})
+
+
+@app.route("/capture/image", methods=["GET"])
+def capture_image():
+    """Return the latest captured+annotated image as JPEG."""
+    cm = detector.get_capture_manager()
+    jpeg = cm.get_latest_capture_jpeg()
+    if jpeg is None:
+        return jsonify({"error": "No capture available"}), 404
+    return Response(jpeg, mimetype="image/jpeg")
+
+
+@app.route("/capture/cooldown", methods=["POST"])
+def capture_cooldown():
+    """Update the cooldown period in seconds."""
+    payload = request.get_json(silent=True) or {}
+    cooldown = payload.get("cooldown")
+    if cooldown is None:
+        return jsonify({"ok": False, "error": "Missing 'cooldown' field"}), 400
+    try:
+        cooldown = float(cooldown)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Cooldown must be a number"}), 400
+    cm = detector.get_capture_manager()
+    if not cm.set_cooldown(cooldown):
+        return jsonify({"ok": False, "error": "Cooldown must be non-negative"}), 400
+    return jsonify({"ok": True, "cooldown": cm.get_cooldown()})
+
+
+@app.route("/capture/reset", methods=["POST"])
+def capture_reset():
+    """Reset the capture state machine back to monitoring."""
+    cm = detector.get_capture_manager()
+    cm.reset()
+    return jsonify({"ok": True, "state": cm.get_state()})
+
+
 def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:
     """Return `preferred` if free, otherwise ask the OS for any free port."""
     import socket
