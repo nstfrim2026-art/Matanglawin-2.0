@@ -52,6 +52,7 @@ class Detector:
         self._latest_jpeg: bytes = self._encode(placeholder_frame(message="STARTING..."))
         self._camera_connected = False
         self._crack_present = False
+        self._crack_metadata: list = []
 
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -74,6 +75,7 @@ class Detector:
                 "camera_connected": self._camera_connected,
                 "crack_present": self._crack_present,
                 "source": self._source_key,
+                "cracks": self._crack_metadata,
             }
 
     def set_source(self, source_key: str) -> bool:
@@ -110,20 +112,21 @@ class Detector:
                 continue
 
             try:
-                annotated, crack_present = annotate_frame(
+                annotated, crack_present, crack_metadata = annotate_frame(
                     frame,
                     weights=self._weights,
                     conf=self._conf,
                     imgsz=self._imgsz,
                 )
             except Exception:
-                annotated, crack_present = frame, False
+                annotated, crack_present, crack_metadata = frame, False, []
 
             jpeg_bytes = self._encode(annotated)
             with self._lock:
                 self._latest_jpeg = jpeg_bytes
                 self._camera_connected = True
                 self._crack_present = crack_present
+                self._crack_metadata = crack_metadata
 
             elapsed = time.monotonic() - loop_start
             remaining = self._min_frame_interval - elapsed
@@ -156,6 +159,7 @@ class Detector:
         with self._lock:
             self._camera_connected = False
             self._crack_present = False
+            self._crack_metadata = []
             self._latest_jpeg = self._encode(placeholder_frame(message="NO SIGNAL"))
 
     @staticmethod

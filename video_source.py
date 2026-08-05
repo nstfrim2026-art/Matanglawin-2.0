@@ -3,17 +3,17 @@ video_source.py - Configurable live video source abstraction.
 
 The goal is that the detection pipeline (detector.py) never needs to know
 *where* frames come from. It just asks a VideoSource for the next frame.
-Swapping the physical camera - laptop webcam today, a phone running
-DroidCam tomorrow, a drone's video feed in the future - never requires
+Swapping the physical camera - laptop webcam today, a phone running an
+IP camera app tomorrow, a drone's video feed in the future - never requires
 touching the inference/detection code, only the small mapping in
 SOURCE_REGISTRY below (or the OpenCV-compatible index/URL passed in).
 
 Supported source kinds:
     "webcam"  - a local camera attached to this machine, opened by
                 numeric index (0, 1, 2, ...).
-    "droidcam" / "ip" - any camera exposed over the network as an MJPEG/
-                RTSP/HTTP stream (DroidCam, IP cameras, and - later - a
-                drone's video downlink all work the same way here).
+    "ip_camera" / "ip" - any camera exposed over the network as an MJPEG/
+                RTSP/HTTP stream (IP cameras, and - later - a drone's
+                video downlink all work the same way here).
 
 Both are opened with cv2.VideoCapture, which already understands plain
 integers (local camera index) and URL strings (network streams), so this
@@ -34,8 +34,8 @@ import numpy as np
 # Known source presets. `spec` is whatever cv2.VideoCapture accepts:
 # an int (local device index) or a string (URL / path).
 #
-# DroidCam's default MJPEG URL looks like http://<phone-ip>:4747/video -
-# override DROIDCAM_URL via the environment for your own phone's IP.
+# IP Camera's default MJPEG URL looks like http://<phone-ip>:4747/video -
+# override IP_CAMERA_URL via the environment for your own camera's IP.
 # ---------------------------------------------------------------------------
 
 
@@ -46,10 +46,10 @@ class SourceSpec:
     spec: object  # int (device index) or str (URL)
 
 
-def build_registry(droidcam_url: str, drone_url: str) -> dict:
+def build_registry(ip_camera_url: str, drone_url: str) -> dict:
     return {
         "webcam": SourceSpec("webcam", "Webcam", 0),
-        "droidcam": SourceSpec("droidcam", "DroidCam", droidcam_url),
+        "ip_camera": SourceSpec("ip_camera", "IP Camera", ip_camera_url),
         "drone": SourceSpec("drone", "Drone Camera", drone_url),
     }
 

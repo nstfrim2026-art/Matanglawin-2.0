@@ -10,7 +10,7 @@
 #   -> open http://localhost:5000
 #
 # Drop --device=/dev/video0 if you're only using a network camera
-# source (DroidCam / future drone feed) instead of a local webcam.
+# source (IP Camera / future drone feed) instead of a local webcam.
 
 FROM python:3.11-slim
 

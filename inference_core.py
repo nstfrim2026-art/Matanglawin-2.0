@@ -85,6 +85,16 @@ def run_overlay(
     return {"num_instances": int(len(result.masks)), "out_path": str(out_path)}
 
 
+def _classify_crack(area_px: int) -> str:
+    """Classify a crack based on its mask pixel area."""
+    if area_px < 500:
+        return "Hairline"
+    elif area_px < 2000:
+        return "Surface-Level"
+    else:
+        return "Structural"
+
+
 def annotate_frame(
     frame_bgr: np.ndarray,
     weights: str = "best.pt",
@@ -94,7 +104,7 @@ def annotate_frame(
     color: Tuple[int, int, int] = (0, 0, 255),  # B, G, R
     outline: int = 2,
     device: Optional[str] = None,
-) -> Tuple[np.ndarray, bool]:
+) -> Tuple[np.ndarray, bool, list]:
     """
     Run YOLO11-seg crack prediction on a single BGR frame (e.g. one frame
     pulled from a live camera/video source) and return an annotated copy.
@@ -105,8 +115,11 @@ def annotate_frame(
     frame of a continuous video stream.
 
     Returns:
-        (annotated_frame_bgr, crack_present) where crack_present is True
-        if at least one crack instance mask was found in this frame.
+        (annotated_frame_bgr, crack_present, crack_metadata_list) where
+        crack_present is True if at least one crack instance mask was found
+        in this frame, and crack_metadata_list is a list of dicts with
+        per-detection analysis (classification, severity, area, bbox,
+        estimated length and width in pixels).
     """
     model = get_model(weights)
 
@@ -124,9 +137,50 @@ def annotate_frame(
     h, w = image.shape[:2]
 
     if result.masks is None or len(result.masks) == 0:
-        return image, False
+        return image, False, []
 
     masks = result.masks.data.cpu().numpy()  # (N, H, W) in [0,1]
+    num_instances = len(masks)
+
+    # Build per-instance metadata
+    crack_metadata_list = []
+    for i in range(num_instances):
+        mask_i = masks[i]
+        # Resize mask to original frame dimensions if needed
+        if mask_i.shape != (h, w):
+            mask_i = cv2.resize(mask_i, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        binary_mask = (mask_i > 0.5).astype(np.uint8)
+        area_px = int(binary_mask.sum())
+
+        # Confidence score from YOLO boxes
+        severity = float(result.boxes.conf[i].cpu().numpy())
+
+        # Bounding box from YOLO boxes
+        bbox = result.boxes.xyxy[i].cpu().numpy().tolist()
+
+        # Compute contour bounding rect for length/width estimates
+        contours_i, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours_i:
+            # Use the largest contour for measurement
+            largest = max(contours_i, key=cv2.contourArea)
+            _, _, cw, ch = cv2.boundingRect(largest)
+            estimated_length_px = float(max(cw, ch))
+            estimated_width_px = float(min(cw, ch))
+        else:
+            estimated_length_px = 0.0
+            estimated_width_px = 0.0
+
+        crack_metadata_list.append({
+            "classification": _classify_crack(area_px),
+            "severity": severity,
+            "area_px": area_px,
+            "bbox": bbox,
+            "estimated_length_px": estimated_length_px,
+            "estimated_width_px": estimated_width_px,
+        })
+
+    # Draw overlay (union of all masks)
     union = np.any(masks > 0.5, axis=0).astype(np.uint8)
 
     if union.shape != (h, w):
@@ -144,4 +198,4 @@ def annotate_frame(
         contours, _ = cv2.findContours(union, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(blended, contours, -1, color, outline)
 
-    return blended, True
+    return blended, True, crack_metadata_list

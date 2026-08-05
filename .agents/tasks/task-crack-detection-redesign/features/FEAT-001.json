@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Extend backend to provide crack analysis metadata (classification, severity, measurements) and rename DroidCam to IP Camera. Modify inference_core.py to compute per-detection metrics, update detector.py to expose the metadata via get_status(), update video_source.py to rename droidcam to ip_camera, and add a /analysis endpoint to app.py.",
+  "status": "in_progress",
+  "steps": [
+    "In inference_core.py, modify annotate_frame() to return a third value: a list of crack analysis dicts. Each dict should contain: 'classification' (classify based on mask area: <500px='Hairline', <2000px='Surface-Level', else 'Structural'), 'severity' (confidence score from YOLO result.boxes.conf), 'area_px' (mask pixel count), 'bbox' (bounding box from result.boxes.xyxy), 'estimated_length_px' and 'estimated_width_px' (computed from contour bounding rect). Return signature becomes: (annotated_frame, crack_present, crack_metadata_list).",
+    "In detector.py, update the Detector class: store the latest crack_metadata list from annotate_frame(), add it to get_status() response as 'cracks' key (list of dicts with classification, severity, area_px, estimated_length_px, estimated_width_px, bbox). Update the _run() method to capture the new third return value.",
+    "In video_source.py, rename the 'droidcam' source to 'ip_camera' with label 'IP Camera'. Update build_registry() parameter from droidcam_url to ip_camera_url. Keep the same URL format support (HTTP MJPEG/RTSP streams).",
+    "In app.py, rename DROIDCAM_URL to IP_CAMERA_URL env var, update build_registry() call, update DEFAULT_SOURCE references. Add a GET /analysis route that returns the crack metadata from detector.get_status()['cracks'] as JSON.",
+    "Update Dockerfile ENV and any references from DROIDCAM to IP_CAMERA."
+  ],
+  "acceptance_criteria": [
+    "annotate_frame() returns a 3-tuple: (frame, bool, list_of_crack_dicts)",
+    "GET /status returns JSON with 'cracks' field containing analysis metadata",
+    "GET /analysis returns JSON array of crack analysis entries",
+    "No references to 'droidcam' or 'DroidCam' remain in any Python file - replaced with 'ip_camera' / 'IP Camera'",
+    "The app starts without errors (python -c import test)"
+  ],
+  "verification": [
+    "cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from inference_core import annotate_frame; import numpy as np; f=np.zeros((480,640,3),dtype=np.uint8); result=annotate_frame(f); assert len(result)==3, f'Expected 3-tuple, got {len(result)}'\"",
+    "cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from app import app; c=app.test_client(); r=c.get('/health'); assert r.status_code==200; r2=c.get('/status'); import json; d=json.loads(r2.data); assert 'cracks' in d, d; r3=c.get('/analysis'); assert r3.status_code==200\"",
+    "cd /projects/sandbox/Matanglawin-2.0 && grep -r 'droidcam\\|DroidCam' *.py && echo 'FAIL: droidcam references remain' || echo 'PASS: no droidcam references'"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

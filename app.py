@@ -10,8 +10,9 @@ dashboard UI lives in templates/ + static/.
 Routes:
     GET  /            Dashboard page (loading screen -> live dashboard).
     GET  /video_feed  MJPEG stream of the annotated live camera feed.
-    GET  /status      JSON: {"camera_connected", "crack_present", "source"}.
-    POST /set_source   Body: {"source": "webcam"|"droidcam"|"drone"}.
+    GET  /status      JSON: {"camera_connected", "crack_present", "source", "cracks"}.
+    GET  /analysis    JSON array of crack analysis entries.
+    POST /set_source   Body: {"source": "webcam"|"ip_camera"|"drone"}.
     GET  /sources     JSON list of available camera sources.
     GET  /health      Basic health check (also confirms the model loads).
 
@@ -26,8 +27,8 @@ Environment variables (optional):
     PORT           Preferred port (default: 5000)
     CONF            Detection confidence threshold (default: 0.25)
     TARGET_FPS      Cap on inference loop rate (default: 8)
-    DEFAULT_SOURCE  "webcam" | "droidcam" | "drone" (default: webcam)
-    DROIDCAM_URL    e.g. http://192.168.1.50:4747/video
+    DEFAULT_SOURCE  "webcam" | "ip_camera" | "drone" (default: webcam)
+    IP_CAMERA_URL   e.g. http://192.168.1.50:4747/video
     DRONE_URL       Placeholder URL/RTSP for a future drone camera feed
 """
 
@@ -55,7 +56,7 @@ WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 CONF = float(os.environ.get("CONF", 0.25))
 TARGET_FPS = float(os.environ.get("TARGET_FPS", 8))
 DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "webcam")
-DROIDCAM_URL = os.environ.get("DROIDCAM_URL", "http://192.168.1.50:4747/video")
+IP_CAMERA_URL = os.environ.get("IP_CAMERA_URL", "http://192.168.1.50:4747/video")
 DRONE_URL = os.environ.get("DRONE_URL", "http://192.168.1.60:8080/video")
 
 app = Flask(
@@ -64,7 +65,7 @@ app = Flask(
     static_folder=str(RESOURCE_DIR / "static"),
 )
 
-REGISTRY = build_registry(droidcam_url=DROIDCAM_URL, drone_url=DRONE_URL)
+REGISTRY = build_registry(ip_camera_url=IP_CAMERA_URL, drone_url=DRONE_URL)
 detector = Detector(
     registry=REGISTRY,
     weights=WEIGHTS,
@@ -105,6 +106,11 @@ def video_feed():
 @app.route("/status", methods=["GET"])
 def status():
     return jsonify(detector.get_status())
+
+
+@app.route("/analysis", methods=["GET"])
+def analysis():
+    return jsonify(detector.get_status()["cracks"])
 
 
 @app.route("/sources", methods=["GET"])
