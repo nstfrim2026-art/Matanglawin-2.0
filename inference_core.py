@@ -6,6 +6,7 @@ infer_overlay.py uses on the command line, so it can also be reused by
 the Flask web app (app.py) without duplicating code.
 """
 
+import threading
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -17,14 +18,20 @@ from ultralytics import YOLO
 # every request (loading is the slow part).
 _MODEL_CACHE = {}
 
+# Serializes model loading and all model.predict() calls.  YOLO/PyTorch
+# models are not thread-safe for concurrent inference on a single instance,
+# and the cache population itself has a TOCTOU race without this lock.
+_MODEL_LOCK = threading.Lock()
+
 
 def get_model(weights: str = "best.pt") -> YOLO:
     weights = str(weights)
-    if weights not in _MODEL_CACHE:
-        if not Path(weights).exists():
-            raise FileNotFoundError(f"Weights not found: {weights}")
-        _MODEL_CACHE[weights] = YOLO(weights)
-    return _MODEL_CACHE[weights]
+    with _MODEL_LOCK:
+        if weights not in _MODEL_CACHE:
+            if not Path(weights).exists():
+                raise FileNotFoundError(f"Weights not found: {weights}")
+            _MODEL_CACHE[weights] = YOLO(weights)
+        return _MODEL_CACHE[weights]
 
 
 def run_overlay(
@@ -46,14 +53,15 @@ def run_overlay(
     """
     model = get_model(weights)
 
-    results = model.predict(
-        source=str(image_path),
-        conf=conf,
-        imgsz=imgsz,
-        retina_masks=True,
-        device=device,
-        verbose=False,
-    )
+    with _MODEL_LOCK:
+        results = model.predict(
+            source=str(image_path),
+            conf=conf,
+            imgsz=imgsz,
+            retina_masks=True,
+            device=device,
+            verbose=False,
+        )
     result = results[0]
 
     image = result.orig_img.copy()  # BGR
@@ -127,14 +135,15 @@ def annotate_frame(
     """
     model = get_model(weights)
 
-    results = model.predict(
-        source=frame_bgr,
-        conf=conf,
-        imgsz=imgsz,
-        retina_masks=True,
-        device=device,
-        verbose=False,
-    )
+    with _MODEL_LOCK:
+        results = model.predict(
+            source=frame_bgr,
+            conf=conf,
+            imgsz=imgsz,
+            retina_masks=True,
+            device=device,
+            verbose=False,
+        )
     result = results[0]
 
     image = frame_bgr.copy()  # BGR
