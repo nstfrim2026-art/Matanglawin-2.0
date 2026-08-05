@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Address 5 review issues: MJPEG generator cleanup, resolution-dependent classification fix, rename severity to confidence, documentation drift, and MJPEG feed reconnection logic.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "In app.py, wrap _mjpeg_generator() with try/except GeneratorExit (or try/finally) so it cleans up gracefully when a client disconnects.",
     "In inference_core.py, change _classify_crack() to normalize by frame area instead of using absolute pixel thresholds. Pass (h, w) to the function and use area_ratio = area_px / (h * w). Use ratio-based thresholds: < 0.002 = Hairline, < 0.01 = Surface-Level, else Structural. Update the call site in annotate_frame() to pass h, w.",
@@ -19,5 +19,5 @@
     "dashboard.js includes MJPEG reconnection logic triggered by camera_connected state change"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 5 review fixes implemented and verified. _classify_crack now normalizes by frame area ratio. Confidence field replaces severity throughout backend and frontend. MJPEG generator has GeneratorExit cleanup. Dashboard reconnects MJPEG stream on camera recovery. No DroidCam or severity references remain."
 }
