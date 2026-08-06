@@ -1,0 +1,7 @@
+{
+  "task_id": "task-letsview-source",
+  "task_description": "Add LetsView screen capture as a new video source for the Matanglawin crack detection system. This enables capturing frames from the DJI Fly app mirrored via LetsView to a Windows laptop. The implementation adds a new letsview_source.py module, integrates it into the existing source registry and detector pipeline, and handles reconnection, window minimization, and resize gracefully.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

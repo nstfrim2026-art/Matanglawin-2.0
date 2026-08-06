@@ -1,0 +1,24 @@
+{
+  "project_type": "Python Flask real-time crack detection web app with YOLO inference",
+  "language": "Python 3.11",
+  "build_system": "pip with requirements.txt, Docker for deployment",
+  "test_framework": "No formal test framework present. Manual verification via Flask app startup and endpoint testing.",
+  "build_command": "pip install -r requirements.txt (after torch CPU install)",
+  "test_command": "python -c \"from video_source import build_registry; from detector import Detector; from letsview_source import LetsViewSource; print('All imports OK')\"",
+  "verification_instructions": "1. Verify all modules import without error. 2. Verify LetsViewSource appears in the source registry. 3. Verify detector can instantiate LetsViewSource when letsview key is selected. 4. On non-Windows systems, LetsViewSource.open() returns False gracefully.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q && pip install -r requirements.txt -q && pip install mss pygetwindow -q",
+  "environment_constraints": "Sandbox runs Linux. pywin32 and dxcam are Windows-only and cannot be installed. The LetsViewSource implementation must gracefully handle ImportError for Windows-specific libraries. Actual window capture only works on Windows. On Linux, LetsViewSource.open() returns False (source shows NO SIGNAL).",
+  "contribution_requirements": "No CONTRIBUTING.md found. Follow existing code style: docstrings on modules/classes, type hints, threading locks for shared state, clean separation between modules.",
+  "key_patterns": "VideoSource interface: open() -> bool, read() -> (bool, Optional[ndarray]), release() -> None, is_open property. detector.py _maybe_switch_source() creates VideoSource(spec) - needs branching for LetsView. build_registry() returns dict of SourceSpec(key, label, spec). Dashboard renders sources via Jinja loop. Source selector uses radio buttons with POST /set_source.",
+  "relevant_files": [
+    "video_source.py",
+    "detector.py",
+    "app.py",
+    "requirements.txt",
+    "Dockerfile",
+    "templates/dashboard.html",
+    "static/js/dashboard.js"
+  ],
+  "directory_structure": "Root: app.py (Flask routes), detector.py (background worker), video_source.py (source abstraction), inference_core.py (YOLO model), capture_manager.py (auto-capture state machine). templates/dashboard.html (Jinja template). static/js/dashboard.js (frontend polling). static/style.css (styles)."
+}

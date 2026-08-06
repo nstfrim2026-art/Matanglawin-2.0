@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add LetsView screen capture source module and integrate it into the existing video pipeline. This creates the new letsview_source.py module implementing the same interface as VideoSource (open, read, release, is_open), updates video_source.py build_registry() to include the letsview entry, updates detector.py _maybe_switch_source() to instantiate LetsViewSource when the letsview spec is selected, adds mss and pygetwindow to requirements.txt, and updates the Dockerfile to install them.",
+  "status": "in_progress",
+  "steps": [
+    "Create letsview_source.py in the project root implementing class LetsViewSource with the interface: open() -> bool, read() -> (bool, Optional[ndarray]), release() -> None, is_open property. Implementation details: (a) Use try/except ImportError for platform-specific imports (mss, pygetwindow; optionally dxcam on Windows). (b) open() should search for a window with title matching any of ['LetsView', 'LetsView Player', 'LetsView Mirror', 'LetsView Windows'] using case-insensitive partial matching via pygetwindow.getWindowsWithTitle(). If no window found, return False. If found, store the window handle and return True. (c) read() should capture the window region using mss. If window is minimized, return (True, placeholder_frame('LetsView window minimized.')). If window is not found (closed), return (False, None) to trigger reconnection. Handle window resize by reading current window geometry each frame. Convert BGRA mss output to BGR ndarray. (d) release() should clean up mss instance. (e) Include a background reconnection mechanism: if the window disappears, open() can be called again. (f) On non-Windows platforms where pygetwindow is unavailable or raises, open() simply returns False. (g) Target 25-30 FPS capture rate - mss is fast enough for this. (h) The capture should run efficiently - avoid unnecessary copies.",
+    "Update video_source.py: Add 'letsview' entry to build_registry(). Use a sentinel spec value 'letsview://' for the SourceSpec. The signature becomes build_registry(ip_camera_url: str, drone_url: str) -> dict (unchanged), but the returned dict includes key 'letsview' with SourceSpec('letsview', 'DJI Fly (LetsView)', 'letsview://').",
+    "Update detector.py _maybe_switch_source(): After getting spec from registry, check if spec == 'letsview://'. If so, import and instantiate LetsViewSource() instead of VideoSource(spec). Add the import at the top: from letsview_source import LetsViewSource. The rest of the logic (opened check, fallback to None) stays the same.",
+    "Update requirements.txt: Add mss>=9.0 and PyGetWindow>=0.0.9 as dependencies with comments explaining they are for the LetsView screen capture source.",
+    "Update Dockerfile: Add 'pip install --no-cache-dir mss PyGetWindow' after the existing pip install lines, OR add them to requirements.txt and let the existing requirements.txt install handle it (preferred since we are adding them to requirements.txt)."
+  ],
+  "acceptance_criteria": [
+    "letsview_source.py exists and defines class LetsViewSource with open(), read(), release(), is_open",
+    "Importing letsview_source on Linux does not raise any error (ImportError for Windows libs is caught internally)",
+    "build_registry() returns a dict that includes key 'letsview' with label 'DJI Fly (LetsView)'",
+    "detector.py _maybe_switch_source() creates LetsViewSource when spec is 'letsview://'",
+    "On Linux (this sandbox), LetsViewSource().open() returns False gracefully without exceptions",
+    "requirements.txt includes mss and PyGetWindow",
+    "The placeholder frame shows 'Waiting for LetsView...' or 'No LetsView window detected.' when source cannot open",
+    "If window is minimized, read() returns a frame with message 'LetsView window minimized.'",
+    "All existing sources (webcam, ip_camera, drone) remain unchanged and functional"
+  ],
+  "verification": [
+    "Run: python -c \"from letsview_source import LetsViewSource; src = LetsViewSource(); print('open:', src.open()); print('is_open:', src.is_open); src.release(); print('OK')\" and confirm it prints open: False, is_open: False, OK without errors",
+    "Run: python -c \"from video_source import build_registry; r = build_registry('http://x', 'http://y'); assert 'letsview' in r; assert r['letsview'].label == 'DJI Fly (LetsView)'; print('Registry OK')\"",
+    "Run: python -c \"from detector import Detector; print('Detector imports OK')\"",
+    "Run: pip install -r requirements.txt -q && python -c \"import mss; print('mss OK')\"",
+    "Run: docker build -t matanglawin-test . to confirm Docker image builds successfully with new dependencies"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

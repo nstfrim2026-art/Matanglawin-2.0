@@ -51,6 +51,7 @@ def build_registry(ip_camera_url: str, drone_url: str) -> dict:
         "webcam": SourceSpec("webcam", "Webcam", 0),
         "ip_camera": SourceSpec("ip_camera", "IP Camera", ip_camera_url),
         "drone": SourceSpec("drone", "Drone Camera", drone_url),
+        "letsview": SourceSpec("letsview", "DJI Fly (LetsView)", "letsview://"),
     }
 
 

@@ -4,6 +4,10 @@ opencv-python-headless>=4.9
 numpy>=1.26
 werkzeug>=3.0
 
+# LetsView screen capture source dependencies
+mss>=9.0
+PyGetWindow>=0.0.9
+
 # NOTE: `ultralytics` depends on `torch`/`torchvision`. On a fresh install,
 # pip may pull the CUDA-enabled build of torch, which is several GB in size
 # and unnecessary for CPU-only inference on a single image. To keep the
