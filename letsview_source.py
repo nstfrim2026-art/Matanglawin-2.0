@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import platform
 import threading
-import time
 from typing import Optional
 
 import cv2
@@ -156,10 +155,16 @@ class LetsViewSource:
         """
         Capture the current frame from the LetsView window.
 
+        NOTE: This uses mss region capture, which grabs the screen area at the
+        window's bounding box coordinates. Any window overlapping the LetsView
+        window will bleed into the captured frame. Ensure LetsView remains in
+        the foreground (not occluded by other windows) during capture sessions.
+
         Returns:
             (True, frame) - successful capture or status frame
             (False, None) - window disappeared, triggers reconnection
         """
+        # --- Phase 1: Validate state and copy geometry under the lock ---
         with self._lock:
             if not self._opened:
                 return False, None
@@ -194,27 +199,32 @@ class LetsViewSource:
             if width <= 0 or height <= 0:
                 return True, _make_status_frame("LetsView window minimized.")
 
-            # Capture the window region using mss
+            # Copy what we need for capture outside the lock
             monitor = {
                 "left": left,
                 "top": top,
                 "width": width,
                 "height": height,
             }
+            sct = self._sct
 
-            try:
-                screenshot = self._sct.grab(monitor)
-            except Exception:
-                # Capture failed - window may have closed
+        # --- Phase 2: Perform capture and conversion outside the lock ---
+        # This avoids blocking is_open and release() during the ~5-15ms
+        # screenshot grab and numpy/color conversion.
+        try:
+            screenshot = sct.grab(monitor)
+        except Exception:
+            # Capture failed - window may have closed
+            with self._lock:
                 self._release_locked()
-                return False, None
+            return False, None
 
-            # Convert BGRA -> BGR numpy array
-            frame = np.array(screenshot, dtype=np.uint8)
-            # mss returns BGRA format
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        # Convert BGRA -> BGR numpy array
+        frame = np.array(screenshot, dtype=np.uint8)
+        # mss returns BGRA format
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-            return True, frame
+        return True, frame
 
     def release(self) -> None:
         """Release capture resources."""

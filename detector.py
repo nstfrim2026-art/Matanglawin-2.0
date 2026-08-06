@@ -105,11 +105,40 @@ class Detector:
 
     # -- internal worker loop -------------------------------------------
     def _run(self) -> None:
+        reconnect_cooldown = 0.0  # monotonic time when next reconnect is allowed
+
         while not self._stop_event.is_set():
             self._maybe_switch_source()
 
             if self._video_source is None or not self._video_source.is_open:
                 self._set_disconnected_frame()
+
+                # Automatic reconnection: if no pending source change and we
+                # have a known source key, re-attempt opening after a 1-second
+                # cooldown.  This keeps the reconnection logic source-agnostic
+                # (works for LetsView, IP cameras, or any transient source).
+                with self._lock:
+                    has_pending = self._pending_source_key is not None
+                    current_key = self._source_key
+
+                if not has_pending and current_key in self._registry:
+                    now = time.monotonic()
+                    if now >= reconnect_cooldown:
+                        spec = self._registry[current_key].spec
+                        if spec == "letsview://":
+                            vs = LetsViewSource()
+                        else:
+                            vs = VideoSource(spec)
+
+                        if vs.open():
+                            self._video_source = vs
+                            # Successfully reconnected, skip the sleep
+                            continue
+                        else:
+                            vs.release()
+                        # Set next retry 1 second from now
+                        reconnect_cooldown = time.monotonic() + 1.0
+
                 time.sleep(0.5)
                 continue
 
