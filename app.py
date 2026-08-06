@@ -43,7 +43,14 @@ from flask import (
 
 from detector import Detector
 from inference_core import get_model
-from inspection_db import get_inspection_by_id, get_inspections, get_summary_stats, init_db
+from inspection_db import (
+    delete_inspection,
+    get_inspection_by_id,
+    get_inspections,
+    get_summary_stats,
+    init_db,
+    update_inspection_notes,
+)
 from report_generator import generate_excel_export, generate_excel_export_to_buffer, generate_full_csv_export
 from video_source import build_registry
 
@@ -248,6 +255,28 @@ def api_inspection_detail(capture_id):
     if record is None:
         return jsonify({"error": "Inspection not found"}), 404
     return jsonify(record)
+
+
+@app.route("/api/inspections/<capture_id>", methods=["DELETE"])
+def api_delete_inspection(capture_id):
+    """Delete an inspection record by capture_id."""
+    deleted = delete_inspection(capture_id)
+    if not deleted:
+        return jsonify({"error": "Inspection not found"}), 404
+    return jsonify({"ok": True, "capture_id": capture_id})
+
+
+@app.route("/api/inspections/<capture_id>/notes", methods=["PATCH"])
+def api_update_notes(capture_id):
+    """Update the notes for an inspection record."""
+    payload = request.get_json(silent=True) or {}
+    notes = payload.get("notes")
+    if notes is None:
+        return jsonify({"ok": False, "error": "Missing 'notes' field"}), 400
+    updated = update_inspection_notes(capture_id, str(notes))
+    if not updated:
+        return jsonify({"error": "Inspection not found"}), 404
+    return jsonify({"ok": True, "capture_id": capture_id, "notes": notes})
 
 
 @app.route("/api/summary", methods=["GET"])

@@ -4,36 +4,105 @@
  * Responsibilities:
  *   - Loading screen fade-out on first successful /status poll or timeout.
  *   - Smooth scrolling for navigation anchor links.
- *   - Poll /status every 1000ms: update hero badge, live indicator, alert state.
- *   - Poll /analysis every 1500ms: render crack entries in analysis panel.
+ *   - Poll /status every 1000ms: update hero badge, live indicator.
+ *   - Poll /capture/status every 1500ms: render crack analysis, manage alerts.
  *   - Camera source selector: POST to /set_source on change.
  *   - Mobile nav toggle handler.
- *   - Alert sound on crack detection rising edge.
+ *   - Alert sound ONLY on analysis_complete state (confirmed crack), with 5s cooldown and auto-recovery.
+ *   - Blinking crack alert banner on confirmed crack detection.
  *   - Scroll-based nav link highlighting.
  */
 
 (function () {
   "use strict";
 
-  const STATUS_POLL_MS = 1000;
-  const ANALYSIS_POLL_MS = 1500;
+  var STATUS_POLL_MS = 1000;
+  var ANALYSIS_POLL_MS = 1500;
+  var ALERT_COOLDOWN_MS = 5000;
 
   // Elements
-  const loadingScreen = document.getElementById("loadingScreen");
-  const heroStatusBadge = document.getElementById("heroStatusBadge");
-  const heroBadgeText = document.getElementById("heroBadgeText");
-  const liveDot = document.getElementById("liveDot");
-  const analysisStatus = document.getElementById("analysisStatus");
-  const analysisContent = document.getElementById("analysisContent");
-  const alertSound = document.getElementById("alertSound");
-  const sourceOptions = document.getElementById("sourceOptions");
-  const navToggle = document.getElementById("navToggle");
-  const navLinks = document.querySelectorAll(".nav-link");
-  const videoFeed = document.getElementById("videoFeed");
+  var loadingScreen = document.getElementById("loadingScreen");
+  var heroStatusBadge = document.getElementById("heroStatusBadge");
+  var heroBadgeText = document.getElementById("heroBadgeText");
+  var liveDot = document.getElementById("liveDot");
+  var analysisStatus = document.getElementById("analysisStatus");
+  var analysisContent = document.getElementById("analysisContent");
+  var sourceOptions = document.getElementById("sourceOptions");
+  var navToggle = document.getElementById("navToggle");
+  var navLinks = document.querySelectorAll(".nav-link");
+  var videoFeed = document.getElementById("videoFeed");
+  var crackAlertBanner = document.getElementById("crackAlertBanner");
 
-  let crackWasPresent = false;
-  let loadingDismissed = false;
-  let cameraWasConnected = false;
+  var loadingDismissed = false;
+  var cameraWasConnected = false;
+
+  // -----------------------------------------------------------------------
+  // Audio Manager - handles alert sound with cooldown and auto-recovery
+  // -----------------------------------------------------------------------
+
+  var AudioManager = {
+    _audio: null,
+    _lastPlayTime: 0,
+    _alertFiredForCurrentCapture: false,
+
+    init: function () {
+      this._createAudio();
+    },
+
+    _createAudio: function () {
+      try {
+        var el = document.getElementById("alertSound");
+        if (el) {
+          this._audio = el;
+        } else {
+          this._audio = new Audio("/static/sounds/alert.wav");
+          this._audio.preload = "auto";
+        }
+      } catch (e) {
+        this._audio = null;
+      }
+    },
+
+    play: function () {
+      var now = Date.now();
+      // Enforce cooldown
+      if (now - this._lastPlayTime < ALERT_COOLDOWN_MS) {
+        return;
+      }
+      // Prevent duplicate for same capture
+      if (this._alertFiredForCurrentCapture) {
+        return;
+      }
+
+      this._lastPlayTime = now;
+      this._alertFiredForCurrentCapture = true;
+
+      if (!this._audio) {
+        this._createAudio();
+      }
+
+      try {
+        this._audio.currentTime = 0;
+        var playPromise = this._audio.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          var self = this;
+          playPromise.catch(function () {
+            // Auto-recovery: recreate audio element on failure
+            self._audio = null;
+            self._createAudio();
+          });
+        }
+      } catch (err) {
+        // Auto-recovery: recreate audio element
+        this._audio = null;
+        this._createAudio();
+      }
+    },
+
+    resetForNewCapture: function () {
+      this._alertFiredForCurrentCapture = false;
+    }
+  };
 
   // -----------------------------------------------------------------------
   // Loading screen
@@ -93,6 +162,22 @@
   }
 
   // -----------------------------------------------------------------------
+  // Crack Alert Banner
+  // -----------------------------------------------------------------------
+
+  function showAlertBanner() {
+    if (crackAlertBanner) {
+      crackAlertBanner.classList.add("active");
+    }
+  }
+
+  function hideAlertBanner() {
+    if (crackAlertBanner) {
+      crackAlertBanner.classList.remove("active");
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Status polling
   // -----------------------------------------------------------------------
 
@@ -125,24 +210,6 @@
         heroBadgeText.textContent = "MONITORING...";
       }
     }
-
-    // Alert sound on rising edge
-    if (crackPresent && !crackWasPresent) {
-      playAlertSound();
-    }
-    crackWasPresent = crackPresent;
-  }
-
-  function playAlertSound() {
-    try {
-      alertSound.currentTime = 0;
-      var playPromise = alertSound.play();
-      if (playPromise && typeof playPromise.catch === "function") {
-        playPromise.catch(function () {});
-      }
-    } catch (err) {
-      /* ignore playback errors */
-    }
   }
 
   async function pollStatus() {
@@ -159,15 +226,15 @@
   }
 
   // -----------------------------------------------------------------------
-  // Capture status polling (replaces old /analysis polling)
+  // Capture status polling
   // -----------------------------------------------------------------------
 
-  const thresholdSlider = document.getElementById("thresholdSlider");
-  const thresholdLabel = document.getElementById("thresholdLabel");
+  var thresholdSlider = document.getElementById("thresholdSlider");
+  var thresholdLabel = document.getElementById("thresholdLabel");
 
-  let lastCaptureTimestamp = null;
-  let alertFiredForCapture = false;
-  let thresholdSyncedFromBackend = false;
+  var lastCaptureTimestamp = null;
+  var thresholdSyncedFromBackend = false;
+  var lastState = "monitoring";
 
   var STATE_LABELS = {
     monitoring: "Monitoring",
@@ -236,9 +303,6 @@
 
     var confidence = (analysis.confidence || 0) * 100;
     var classification = analysis.classification || "Unknown";
-    var area = analysis.area_px || 0;
-    var length = analysis.estimated_length_px || 0;
-    var width = analysis.estimated_width_px || 0;
     var timestamp = analysis.timestamp || "";
     var colorClass = getConfidenceColor(confidence);
     var classClass = getClassificationClass(classification);
@@ -274,20 +338,6 @@
       '%"></div>';
     html += "</div>";
     html += "</div>";
-    html += '<div class="crack-dimensions">';
-    html +=
-      '<span class="crack-dim-item">Length: <span>' +
-      Math.round(length) +
-      "px</span></span>";
-    html +=
-      '<span class="crack-dim-item">Width: <span>' +
-      Math.round(width) +
-      "px</span></span>";
-    html +=
-      '<span class="crack-dim-item">Area: <span>' +
-      Math.round(area) +
-      "px</span></span>";
-    html += "</div>";
     if (timestamp) {
       html +=
         '<div class="capture-timestamp">Captured: ' +
@@ -320,17 +370,20 @@
       var state = data.state || "monitoring";
       updateAnalysisStatus(state);
 
-      // Trigger alert sound on threshold_reached or capturing (rising edge)
-      if (
-        (state === "threshold_reached" || state === "capturing") &&
-        !alertFiredForCapture
-      ) {
-        playAlertSound();
-        alertFiredForCapture = true;
+      // Alert sound and banner: ONLY on analysis_complete (confirmed crack)
+      if (state === "analysis_complete") {
+        showAlertBanner();
+        AudioManager.play();
       }
+
+      // Hide banner when state returns to monitoring or cooldown
       if (state === "monitoring" || state === "cooldown") {
-        alertFiredForCapture = false;
+        hideAlertBanner();
+        AudioManager.resetForNewCapture();
       }
+
+      // Track state transitions
+      lastState = state;
 
       // Render capture results or empty state
       if (state === "analysis_complete" && data.latest_analysis) {
@@ -349,8 +402,6 @@
             '<div class="analysis-empty"><p>No cracks detected - Monitoring...</p></div>';
         }
       }
-      // If a previous capture exists but state is not analysis_complete,
-      // keep the last analysis displayed (fixed until next capture)
     } catch (err) {
       /* ignore - status polling will handle connectivity */
     }
@@ -414,43 +465,11 @@
   }
 
   // -----------------------------------------------------------------------
-  // Dashboard summary polling (/api/summary every 5s)
-  // -----------------------------------------------------------------------
-
-  const SUMMARY_POLL_MS = 5000;
-
-  async function pollSummary() {
-    try {
-      var res = await fetch("/api/summary", { cache: "no-store" });
-      if (!res.ok) return;
-      var data = await res.json();
-
-      var elTotal = document.getElementById("summaryTotalInspections");
-      var elCracks = document.getElementById("summaryConfirmedCracks");
-      var elAvgConf = document.getElementById("summaryAvgConfidence");
-      var elLargest = document.getElementById("summaryLargestCrack");
-      var elAvgSize = document.getElementById("summaryAvgCrackSize");
-      var elToday = document.getElementById("summaryToday");
-
-      if (elTotal) elTotal.textContent = data.total_inspections || 0;
-      if (elCracks) elCracks.textContent = data.total_confirmed_cracks || 0;
-      if (elAvgConf) {
-        var avgConf = data.average_confidence || 0;
-        elAvgConf.textContent = (avgConf * 100).toFixed(1) + "%";
-      }
-      if (elLargest) elLargest.textContent = (data.largest_crack || 0) + " px";
-      if (elAvgSize) elAvgSize.textContent = (data.average_crack_size || 0) + " px";
-      if (elToday) elToday.textContent = data.inspections_today || 0;
-    } catch (err) {
-      /* ignore - summary is non-critical */
-    }
-  }
-
-  // -----------------------------------------------------------------------
   // Init
   // -----------------------------------------------------------------------
 
   function init() {
+    AudioManager.init();
     setupSmoothScroll();
     setupSourceSelector();
     setupThresholdSlider();
@@ -459,10 +478,8 @@
     // Start polling
     pollStatus();
     pollAnalysis();
-    pollSummary();
     setInterval(pollStatus, STATUS_POLL_MS);
     setInterval(pollAnalysis, ANALYSIS_POLL_MS);
-    setInterval(pollSummary, SUMMARY_POLL_MS);
 
     // Scroll-based nav highlighting
     window.addEventListener("scroll", updateActiveNav);

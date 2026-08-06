@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Frontend overhaul: remove unnecessary UI elements (stats cards, measurements, Drone Camera title, Inspection Summary section), add blinking danger alert banner on crack confirmation, fix alert sound with proper cooldown/state management, simplify analysis panel to show only confidence and result, and apply professional dark theme with modern polish.",
+  "status": "in_progress",
+  "steps": [
+    "1. In templates/dashboard.html: (a) Remove the entire 'Dashboard Summary Section' (the section with id='dashboard-summary' containing Total Inspections, Confirmed Cracks, Avg Confidence, Largest Crack, Avg Crack Size, Inspections Today cards). (b) Remove 'Drone Camera' references from the page title or any headers. (c) Add a new blinking warning banner div (id='crackAlertBanner') at the top of the live-detection section, initially hidden, with text showing a warning emoji + 'CRACK DETECTED' + warning emoji.",
+    "2. In static/js/dashboard.js: (a) Remove the entire pollSummary() function and its setInterval call. (b) Remove all references to summary DOM elements (summaryTotalInspections, summaryConfirmedCracks, etc). (c) Rewrite the alert sound logic: create a dedicated AudioManager class/object that handles playback with a 5-second cooldown, prevents duplicate plays, auto-recovers on playback failure (recreates Audio element if needed), and only fires AFTER analysis_complete state with a confirmed crack. (d) Add banner show/hide logic: show the crackAlertBanner with blinking animation when state is 'analysis_complete', hide it when state returns to 'monitoring' or 'cooldown'. (e) In renderCaptureAnalysis(), remove Length, Width, and Area display. Only show: captured image, classification badge, confidence bar with percentage, and timestamp.",
+    "3. In static/style.css: (a) Remove all .dashboard-summary-section, .dashboard-summary-grid, .dashboard-summary-card, .dashboard-summary-value, .dashboard-summary-label styles. (b) Add styles for .crack-alert-banner: position fixed or absolute at top of live section, full width, background gradient red/orange, large bold white text, z-index high, blinking animation (CSS @keyframes blink alternating opacity), padding 16px, text-align center, font-size 1.4rem, display:none by default, display:flex when .active class is added. (c) Convert the entire page to a dark theme: change --white to #0f0f1a, --light-bg to #1a1a2e, --text-dark to #f0f0f0, --text-gray to #a0a0b0, body background to dark, navbar background to dark with subtle border, hero section dark, features section dark, how-it-works dark, contact dark. Keep the live-section as-is (already dark). (d) Polish: improve spacing, add subtle transitions, ensure buttons have hover states, improve typography with slightly larger base font.",
+    "4. In templates/inspections.html: (a) Remove the summary-cards section (Total Inspections, Confirmed Cracks, Avg Confidence, Largest Crack, Today). (b) Remove the 'Area (px)' column from the table. (c) Add a 'Notes' column (can be empty, future use). (d) Add a Delete button/action per row. (e) Apply the same dark theme styling consistent with the main dashboard. (f) Keep export CSV and Excel buttons.",
+    "5. In app.py: Add a DELETE endpoint for inspections: DELETE /api/inspections/<capture_id> that removes the record from SQLite and optionally deletes associated files. Also add a notes update endpoint: PATCH /api/inspections/<capture_id>/notes that accepts {notes: string}.",
+    "6. In inspection_db.py: Add delete_inspection(capture_id) function that removes a record. Add update_inspection_notes(capture_id, notes) function. Add a 'notes' column to the schema (with ALTER TABLE migration for existing databases)."
+  ],
+  "acceptance_criteria": [
+    "Dashboard Summary section (Total Inspections, Confirmed Cracks, etc) is completely removed from HTML, JS, and CSS",
+    "No references to Length, Width, Area, Structural Confidence in the analysis panel rendering",
+    "Blinking red/orange warning banner appears on crack confirmation and disappears on reset",
+    "Alert sound only plays after confirmed crack (analysis_complete state), has 5-second cooldown, auto-recovers",
+    "Entire page uses dark theme (dark backgrounds, light text) for professional appearance",
+    "Inspections page has delete functionality and notes column",
+    "DELETE /api/inspections/<id> endpoint works",
+    "python tests/test_integration.py passes"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py",
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from app import app; c=app.test_client(); r=c.get('/'); assert r.status_code==200; assert b'dashboard-summary' not in r.data; assert b'crackAlertBanner' in r.data or b'crack-alert-banner' in r.data; print('Dashboard HTML checks pass')\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

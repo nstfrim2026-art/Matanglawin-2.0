@@ -74,6 +74,12 @@ def test_flask_endpoints():
             )
         print(f"  [PASS] {path}: status={r.status_code}")
 
+    # Verify dashboard does not contain dashboard-summary
+    r = c.get("/")
+    assert b"dashboard-summary" not in r.data, "Dashboard still has dashboard-summary"
+    assert b"crack-alert-banner" in r.data, "Dashboard missing crack-alert-banner"
+    print("  [PASS] Dashboard: no dashboard-summary, has crack-alert-banner")
+
     # Verify /api/summary fields
     r = c.get("/api/summary")
     data = r.get_json()
@@ -109,6 +115,68 @@ def test_flask_endpoints():
     ]:
         assert field in data, f"/capture/status missing field: {field}"
     print("  [PASS] /capture/status has all required fields")
+
+    # Test DELETE /api/inspections/<id> (non-existent)
+    r = c.delete("/api/inspections/NONEXISTENT-999")
+    assert r.status_code == 404, f"DELETE non-existent: expected 404, got {r.status_code}"
+    print("  [PASS] DELETE /api/inspections/<id> returns 404 for non-existent")
+
+    # Test PATCH /api/inspections/<id>/notes (non-existent)
+    r = c.patch(
+        "/api/inspections/NONEXISTENT-999/notes",
+        json={"notes": "test"},
+        content_type="application/json",
+    )
+    assert r.status_code == 404, f"PATCH notes non-existent: expected 404, got {r.status_code}"
+    print("  [PASS] PATCH /api/inspections/<id>/notes returns 404 for non-existent")
+
+    # Test PATCH /api/inspections/<id>/notes (missing field)
+    r = c.patch(
+        "/api/inspections/NONEXISTENT-999/notes",
+        json={},
+        content_type="application/json",
+    )
+    assert r.status_code == 400, f"PATCH notes missing field: expected 400, got {r.status_code}"
+    print("  [PASS] PATCH /api/inspections/<id>/notes returns 400 when missing notes field")
+
+    # Test full DELETE workflow: insert then delete via API
+    import inspection_db
+    inspection_db.insert_inspection({
+        "capture_id": "TEST-API-DEL-001",
+        "timestamp": "2024-06-15T12:00:00Z",
+        "confidence": 0.90,
+        "classification": "crack",
+    })
+    r = c.delete("/api/inspections/TEST-API-DEL-001")
+    assert r.status_code == 200, f"DELETE existing: expected 200, got {r.status_code}"
+    data = r.get_json()
+    assert data["ok"] is True
+    print("  [PASS] DELETE /api/inspections/<id> successfully deletes existing record")
+
+    # Test full PATCH workflow: insert then update notes via API
+    inspection_db.insert_inspection({
+        "capture_id": "TEST-API-NOTE-001",
+        "timestamp": "2024-06-15T12:00:00Z",
+        "confidence": 0.88,
+        "classification": "crack",
+    })
+    r = c.patch(
+        "/api/inspections/TEST-API-NOTE-001/notes",
+        json={"notes": "Updated note"},
+        content_type="application/json",
+    )
+    assert r.status_code == 200, f"PATCH notes: expected 200, got {r.status_code}"
+    data = r.get_json()
+    assert data["ok"] is True
+    assert data["notes"] == "Updated note"
+    print("  [PASS] PATCH /api/inspections/<id>/notes successfully updates notes")
+
+    # Cleanup
+    conn = sqlite3.connect(inspection_db._DB_PATH)
+    conn.execute("DELETE FROM inspections WHERE capture_id='TEST-API-NOTE-001'")
+    conn.commit()
+    conn.close()
+
     print()
 
 
@@ -123,6 +191,14 @@ def test_database():
         inspection_db._DB_PATH
     ), "inspections.db not created"
     print("  [PASS] init_db() creates database file")
+
+    # Verify notes column exists after migration
+    conn = sqlite3.connect(inspection_db._DB_PATH)
+    cursor = conn.execute("PRAGMA table_info(inspections)")
+    columns = [row[1] for row in cursor.fetchall()]
+    conn.close()
+    assert "notes" in columns, "notes column not present after migration"
+    print("  [PASS] 'notes' column exists in schema")
 
     # insert_inspection
     row_id = inspection_db.insert_inspection(
@@ -163,14 +239,24 @@ def test_database():
     assert summary["average_confidence"] > 0
     print(f"  [PASS] get_summary_stats() returns valid stats")
 
-    # Cleanup
-    conn = sqlite3.connect(inspection_db._DB_PATH)
-    conn.execute(
-        "DELETE FROM inspections WHERE capture_id='TEST-INTEG-001'"
-    )
-    conn.commit()
-    conn.close()
-    print("  [PASS] Test record cleaned up")
+    # update_inspection_notes
+    updated = inspection_db.update_inspection_notes("TEST-INTEG-001", "Test note")
+    assert updated is True, "update_inspection_notes returned False"
+    record = inspection_db.get_inspection_by_id("TEST-INTEG-001")
+    assert record["notes"] == "Test note", f"Notes not updated: {record.get('notes')}"
+    print("  [PASS] update_inspection_notes() works correctly")
+
+    # delete_inspection
+    deleted = inspection_db.delete_inspection("TEST-INTEG-001")
+    assert deleted is True, "delete_inspection returned False"
+    record = inspection_db.get_inspection_by_id("TEST-INTEG-001")
+    assert record is None, "Record still exists after deletion"
+    print("  [PASS] delete_inspection() removes record")
+
+    # delete non-existent
+    deleted_none = inspection_db.delete_inspection("NONEXISTENT-ID")
+    assert deleted_none is False, "delete_inspection should return False for non-existent"
+    print("  [PASS] delete_inspection() returns False for non-existent ID")
     print()
 
 

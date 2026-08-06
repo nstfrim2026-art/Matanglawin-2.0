@@ -64,6 +64,13 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_inspections_capture_id
                 ON inspections(capture_id)
             """)
+            # Migrate: add 'notes' column if not present
+            cursor = conn.execute("PRAGMA table_info(inspections)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "notes" not in columns:
+                conn.execute(
+                    "ALTER TABLE inspections ADD COLUMN notes TEXT DEFAULT ''"
+                )
             conn.commit()
         finally:
             conn.close()
@@ -195,6 +202,46 @@ def get_inspection_by_id(capture_id: str) -> Optional[Dict[str, Any]]:
                 (capture_id,),
             ).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+def delete_inspection(capture_id: str) -> bool:
+    """
+    Delete an inspection record by capture_id.
+
+    Returns:
+        True if a record was deleted, False if not found.
+    """
+    with _DB_LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM inspections WHERE capture_id = ?",
+                (capture_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+
+def update_inspection_notes(capture_id: str, notes: str) -> bool:
+    """
+    Update the notes field for an inspection record.
+
+    Returns:
+        True if a record was updated, False if not found.
+    """
+    with _DB_LOCK:
+        conn = _get_connection()
+        try:
+            cursor = conn.execute(
+                "UPDATE inspections SET notes = ? WHERE capture_id = ?",
+                (notes, capture_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
         finally:
             conn.close()
 

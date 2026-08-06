@@ -1,21 +1,23 @@
 /* =========================================================================
-   MATANGLAWIN - Modern Marketing + Live Detection Dashboard
-   White/light background with red (#d21f1f) accents
+   MATANGLAWIN - Professional Dark Theme + Live Detection Dashboard
+   Dark background with red (#d21f1f) accents
    ========================================================================= */
 
 :root {
   --primary-red: #d21f1f;
   --dark-red: #a01818;
-  --white: #ffffff;
-  --light-bg: #f8f9fa;
-  --dark-bg: #1a1a2e;
+  --white: #0d0d1a;
+  --light-bg: #1a1a2e;
+  --dark-bg: #0d0d1a;
   --dark-bg-2: #16162a;
-  --text-dark: #1a1a1a;
-  --text-gray: #666666;
+  --text-dark: #f0f0f0;
+  --text-gray: #a0a0b0;
   --text-light: #f0f0f0;
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.15);
+  --card-bg: #1e1e34;
+  --card-border: rgba(255, 255, 255, 0.08);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
   --radius: 12px;
   --radius-lg: 16px;
   --nav-height: 70px;
@@ -33,10 +35,11 @@ html {
 
 body {
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--white);
+  background: var(--dark-bg);
   color: var(--text-dark);
-  line-height: 1.6;
+  line-height: 1.65;
   overflow-x: hidden;
+  font-size: 16px;
 }
 
 /* -------------------------------------------------------------------------
@@ -52,7 +55,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--white);
+  background: var(--dark-bg);
   transition: opacity 0.6s ease, visibility 0.6s ease;
 }
 
@@ -72,7 +75,7 @@ body {
   font-size: 1.8rem;
   font-weight: 800;
   letter-spacing: 3px;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 .loading-status {
@@ -98,8 +101,8 @@ body {
   left: 0;
   right: 0;
   height: var(--nav-height);
-  background: var(--white);
-  box-shadow: var(--shadow-sm);
+  background: #0a0a16;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -137,7 +140,7 @@ body {
   font-size: 1.1rem;
   font-weight: 800;
   letter-spacing: 2px;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 .nav-brand-tagline {
@@ -166,7 +169,7 @@ body {
   display: block;
   width: 100%;
   height: 3px;
-  background: var(--text-dark);
+  background: var(--text-light);
   border-radius: 2px;
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
@@ -179,7 +182,7 @@ body {
 
 .nav-link {
   text-decoration: none;
-  color: var(--text-dark);
+  color: var(--text-gray);
   font-size: 0.9rem;
   font-weight: 500;
   transition: color 0.2s ease;
@@ -228,7 +231,7 @@ body {
   padding-top: var(--nav-height);
   display: flex;
   align-items: center;
-  background: var(--white);
+  background: var(--dark-bg);
 }
 
 .hero-container {
@@ -252,7 +255,7 @@ body {
   font-size: 3.5rem;
   font-weight: 900;
   line-height: 1.1;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 .hero-subtitle {
@@ -355,7 +358,7 @@ body {
   font-weight: 800;
   text-align: center;
   margin-bottom: 50px;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 /* -------------------------------------------------------------------------
@@ -374,10 +377,11 @@ body {
 }
 
 .feature-card {
-  background: var(--white);
+  background: var(--card-bg);
   border-radius: var(--radius-lg);
   padding: 40px 32px;
   box-shadow: var(--shadow-md);
+  border: 1px solid var(--card-border);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -401,7 +405,7 @@ body {
   font-size: 1.4rem;
   font-weight: 700;
   margin-bottom: 12px;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 .feature-card-desc {
@@ -416,7 +420,7 @@ body {
 
 .how-section {
   padding: 100px 0;
-  background: var(--white);
+  background: var(--dark-bg);
 }
 
 .steps-grid {
@@ -429,7 +433,8 @@ body {
   text-align: center;
   padding: 40px 24px;
   border-radius: var(--radius-lg);
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
   transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
 
@@ -467,7 +472,7 @@ body {
   font-size: 1.3rem;
   font-weight: 700;
   margin-bottom: 10px;
-  color: var(--text-dark);
+  color: var(--text-light);
 }
 
 .step-desc {
@@ -768,53 +773,35 @@ body {
 }
 
 /* -------------------------------------------------------------------------
-   Dashboard Summary Section
+   Crack Alert Banner
    ------------------------------------------------------------------------- */
 
-.dashboard-summary-section {
-  padding: 80px 0;
-  background: var(--light-bg);
-}
-
-.dashboard-summary-section .section-title {
-  color: var(--text-dark);
-}
-
-.dashboard-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 24px;
-}
-
-.dashboard-summary-card {
-  background: var(--white);
+.crack-alert-banner {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 18px 24px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #d21f1f, #ff6b00);
   border-radius: var(--radius);
-  padding: 28px 20px;
-  text-align: center;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid #e8e8e8;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.dashboard-summary-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-md);
-}
-
-.dashboard-summary-value {
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 800;
-  color: var(--primary-red);
-  margin-bottom: 8px;
-  line-height: 1.2;
+  color: #ffffff;
+  text-align: center;
+  letter-spacing: 2px;
+  z-index: 100;
+  animation: none;
 }
 
-.dashboard-summary-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-gray);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+.crack-alert-banner.active {
+  display: flex;
+  animation: bannerBlink 0.8s ease-in-out infinite;
+}
+
+@keyframes bannerBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 /* -------------------------------------------------------------------------
@@ -840,8 +827,9 @@ body {
    ------------------------------------------------------------------------- */
 
 .site-footer {
-  background: #111111;
+  background: #080810;
   padding: 40px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .footer-container {
@@ -1050,7 +1038,7 @@ body {
     top: var(--nav-height);
     left: 0;
     right: 0;
-    background: var(--white);
+    background: #0a0a16;
     flex-direction: column;
     padding: 20px 24px;
     gap: 16px;
