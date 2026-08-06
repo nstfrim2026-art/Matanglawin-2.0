@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "pass",
-    "summary": "All imports work. LetsViewSource gracefully returns open:False on Linux. Registry includes 'letsview' with correct label. Detector imports and instantiates correctly. Docker image builds successfully."
+    "summary": "All imports work. LetsViewSource gracefully returns open:False on Linux. Registry includes 'letsview' with correct label. Detector imports and handles reconnection correctly. Docker image builds successfully. Semantic review APPROVED on v2."
   }
 }
