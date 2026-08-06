@@ -45,6 +45,7 @@ from detector import Detector
 from inference_core import get_model
 from inspection_db import (
     delete_inspection,
+    get_all_inspections,
     get_inspection_by_id,
     get_inspections,
     get_summary_stats,
@@ -257,12 +258,32 @@ def api_inspection_detail(capture_id):
     return jsonify(record)
 
 
+# NOTE: No authentication or CSRF protection on these destructive endpoints.
+# This is a known limitation acceptable for this research/demo system that runs
+# on localhost. If the system is ever exposed to a network, add an API key or
+# session-based auth to prevent unauthorized modifications.
+
 @app.route("/api/inspections/<capture_id>", methods=["DELETE"])
 def api_delete_inspection(capture_id):
-    """Delete an inspection record by capture_id."""
+    """Delete an inspection record by capture_id and remove associated files."""
+    # Query the record first to get file paths before deletion
+    record = get_inspection_by_id(capture_id)
+    if record is None:
+        return jsonify({"error": "Inspection not found"}), 404
+
     deleted = delete_inspection(capture_id)
     if not deleted:
         return jsonify({"error": "Inspection not found"}), 404
+
+    # Attempt to remove associated files from disk (ignore if already gone)
+    for path_key in ("image_path", "overlay_path", "metadata_path", "report_path"):
+        file_path = record.get(path_key)
+        if file_path:
+            try:
+                os.unlink(file_path)
+            except (FileNotFoundError, OSError):
+                pass
+
     return jsonify({"ok": True, "capture_id": capture_id})
 
 
@@ -292,8 +313,7 @@ def api_export_csv():
     import csv
     import io
 
-    result = get_inspections(page=1, per_page=10000)
-    items = result["items"]
+    items = get_all_inspections()
 
     headers = [
         "capture_id", "timestamp", "classification", "confidence",
@@ -324,8 +344,7 @@ def api_export_excel():
     """Export all inspection records as an Excel file download."""
     import io
 
-    result = get_inspections(page=1, per_page=10000)
-    items = result["items"]
+    items = get_all_inspections()
 
     mem = io.BytesIO()
     generate_excel_export_to_buffer(items, mem)

@@ -61,6 +61,12 @@ def validate_cracks(
     ui_bottom_boundary = h * (1.0 - DJI_UI_ZONE_FRACTION)
 
     for i, meta in enumerate(crack_metadata_list):
+        # NOTE: Positional coupling assumption - masks[i] corresponds to
+        # crack_metadata_list[i]. This holds because annotate_frame() builds
+        # both arrays in the same loop over range(num_instances). If any
+        # upstream filtering or reordering is ever applied to
+        # crack_metadata_list before passing it here, the masks must be
+        # filtered/reordered in the same way to maintain alignment.
         # 0. DJI UI zone rejection: reject detections whose bbox is entirely
         # within the top or bottom 15% of the frame (typical DJI Fly overlay)
         bbox = meta.get("bbox")

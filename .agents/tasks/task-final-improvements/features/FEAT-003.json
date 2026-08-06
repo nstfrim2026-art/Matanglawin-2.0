@@ -1,0 +1,30 @@
+{
+  "id": "FEAT-003",
+  "type": "fix",
+  "description": "Address 7 review findings: remove DB lock contention, move LetsView per-frame import, delete inspection files on DELETE, remove CSV export 10k cap, add logging to capture worker exceptions, document no-auth as known limitation, add defensive comment for mask-metadata coupling.",
+  "status": "in_progress",
+  "steps": [
+    "1. In inspection_db.py: Remove the global _DB_LOCK and all `with _DB_LOCK:` wrappers. SQLite WAL mode (already enabled) supports concurrent readers; rely on busy_timeout for write serialization.",
+    "2. In letsview_source.py: Move `import winsdk.windows.graphics.imaging as imaging` out of the read() method. Cache it at module level with the other winsdk imports (inside the try/except block).",
+    "3. In app.py DELETE endpoint: Before calling delete_inspection(), query the record to get file paths (image_path, overlay_path, metadata_path, report_path), then after successful deletion, attempt os.unlink() on each file (ignoring FileNotFoundError).",
+    "4. In app.py api_export_csv and api_export_excel: Remove the hard cap of per_page=10000. Fetch all records without a per_page limit.",
+    "5. In capture_manager.py _capture_worker: Add logging.exception() in the except Exception block. Add `import logging` and create a module-level logger.",
+    "6. In app.py: Add a comment near the DELETE/PATCH routes documenting that no auth is a known limitation for this research/demo system.",
+    "7. In crack_validator.py validate_cracks: Add a defensive comment noting the positional coupling assumption between masks array indices and crack_metadata_list order."
+  ],
+  "acceptance_criteria": [
+    "_DB_LOCK is removed from inspection_db.py",
+    "winsdk.windows.graphics.imaging import is at module level in letsview_source.py",
+    "DELETE endpoint removes files from disk",
+    "CSV/Excel export fetches all records without 10k cap",
+    "capture_manager logs exceptions instead of swallowing them",
+    "Auth limitation is documented in app.py",
+    "Mask-metadata coupling is documented in crack_validator.py",
+    "python tests/test_integration.py passes"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py"
+  ],
+  "blocked_reason": null,
+  "findings": null
+}

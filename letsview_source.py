@@ -47,14 +47,17 @@ if platform.system() == "Windows":
             IDirect3DSurface,
         )
         import winsdk.windows.graphics.capture as wgc
+        import winsdk.windows.graphics.imaging as imaging
 
         _winsdk_available = True
         _PLATFORM_OK = True
     except (ImportError, OSError, AttributeError):
         _winsdk_available = False
         _PLATFORM_OK = False
+        imaging = None  # type: ignore[assignment]
 else:
     _winsdk_available = False
+    imaging = None  # type: ignore[assignment]
 
 # Window title patterns to match (case-insensitive partial match)
 _LETSVIEW_TITLES = [
@@ -245,8 +248,7 @@ class LetsViewSource:
 
                 # Convert the captured surface to numpy array
                 surface = frame.surface
-                # Access the underlying bitmap data
-                import winsdk.windows.graphics.imaging as imaging
+                # Access the underlying bitmap data using module-level imaging import
 
                 soft_bitmap = imaging.SoftwareBitmap.create_copy_from_surface_async(
                     surface,

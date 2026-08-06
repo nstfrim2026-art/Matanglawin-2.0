@@ -28,6 +28,7 @@ Output directory structure:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -42,6 +43,8 @@ from image_quality import validate_image_quality
 from inference_core import annotate_frame
 from inspection_db import init_db, insert_inspection
 from report_generator import generate_csv_record, generate_pdf_report
+
+logger = logging.getLogger(__name__)
 
 
 # Valid states in the capture workflow
@@ -562,7 +565,8 @@ class CaptureManager:
                 self._state_change_time = time.monotonic()
 
         except Exception:
-            # On any unexpected error, reset to monitoring
+            # On any unexpected error, log the traceback and reset to monitoring
+            logger.exception("Capture worker failed")
             with self._lock:
                 self._state = "monitoring"
                 self._state_change_time = time.monotonic()

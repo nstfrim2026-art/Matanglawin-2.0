@@ -1,0 +1,33 @@
+{
+  "project_type": "Python Flask web app with YOLO11-seg ML inference, MJPEG video streaming, SQLite inspection database",
+  "language": "Python (backend), JavaScript (frontend), CSS",
+  "build_system": "pip with requirements.txt, no Makefile",
+  "test_framework": "Custom integration tests in tests/test_integration.py (25 assertions, runs as script)",
+  "build_command": "cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"import app; import detector; import capture_manager; import inference_core; import video_source; import image_quality; import crack_validator; import inspection_db; import report_generator; print('All imports OK')\"",
+  "test_command": "cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py",
+  "verification_instructions": "1. Run python tests/test_integration.py to verify all modules import and endpoints respond. 2. Verify Flask test client endpoints return expected JSON/HTML. 3. Verify crack_validator tests pass (small blobs rejected, elongated cracks pass). 4. Verify image_quality tests pass.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "Already set up. venv exists at /projects/sandbox/Matanglawin-2.0/venv. Activate with: source venv/bin/activate",
+  "environment_constraints": "OPEN_INTERNET network mode. No GPU available (CPU inference only). No physical camera or LetsView window available for live testing. Windows-specific packages (pygetwindow, winsdk/winrt) cannot be functionally tested on this Linux sandbox but imports must be guarded. The best.pt weights file exists for model loading tests.",
+  "contribution_requirements": "Branch: feature/crack-detection-webapp. All existing tests must continue to pass. Keep the existing architecture (separate modules for detector, inference_core, capture_manager, etc).",
+  "key_patterns": "VideoSource/LetsViewSource provide open/read/release/is_open interface. Detector runs background thread calling annotate_frame() and passing frames to CaptureManager. CaptureManager is a state machine (monitoring->threshold_reached->capturing->analyzing->analysis_complete->cooldown). Flask routes only read from Detector. Frontend polls /status, /capture/status, /api/summary. Templates use Jinja2. CSS uses custom properties in :root.",
+  "relevant_files": [
+    "app.py",
+    "detector.py",
+    "capture_manager.py",
+    "inference_core.py",
+    "image_quality.py",
+    "crack_validator.py",
+    "inspection_db.py",
+    "report_generator.py",
+    "video_source.py",
+    "letsview_source.py",
+    "templates/dashboard.html",
+    "templates/inspections.html",
+    "static/style.css",
+    "static/js/dashboard.js",
+    "requirements.txt",
+    "tests/test_integration.py"
+  ],
+  "directory_structure": "Root: all Python modules at top level. templates/ has dashboard.html and inspections.html. static/ has style.css, js/dashboard.js, sounds/alert.wav, img/*.svg. tests/ has test_integration.py. captures/ directory for saved inspections (images/, overlays/, metadata/, reports/, exports/)."
+}
