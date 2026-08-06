@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Add LetsView screen capture source module and integrate it into the existing video pipeline. This creates the new letsview_source.py module implementing the same interface as VideoSource (open, read, release, is_open), updates video_source.py build_registry() to include the letsview entry, updates detector.py _maybe_switch_source() to instantiate LetsViewSource when the letsview spec is selected, adds mss and pygetwindow to requirements.txt, and updates the Dockerfile to install them.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create letsview_source.py in the project root implementing class LetsViewSource with the interface: open() -> bool, read() -> (bool, Optional[ndarray]), release() -> None, is_open property. Implementation details: (a) Use try/except ImportError for platform-specific imports (mss, pygetwindow; optionally dxcam on Windows). (b) open() should search for a window with title matching any of ['LetsView', 'LetsView Player', 'LetsView Mirror', 'LetsView Windows'] using case-insensitive partial matching via pygetwindow.getWindowsWithTitle(). If no window found, return False. If found, store the window handle and return True. (c) read() should capture the window region using mss. If window is minimized, return (True, placeholder_frame('LetsView window minimized.')). If window is not found (closed), return (False, None) to trigger reconnection. Handle window resize by reading current window geometry each frame. Convert BGRA mss output to BGR ndarray. (d) release() should clean up mss instance. (e) Include a background reconnection mechanism: if the window disappears, open() can be called again. (f) On non-Windows platforms where pygetwindow is unavailable or raises, open() simply returns False. (g) Target 25-30 FPS capture rate - mss is fast enough for this. (h) The capture should run efficiently - avoid unnecessary copies.",
     "Update video_source.py: Add 'letsview' entry to build_registry(). Use a sentinel spec value 'letsview://' for the SourceSpec. The signature becomes build_registry(ip_camera_url: str, drone_url: str) -> dict (unchanged), but the returned dict includes key 'letsview' with SourceSpec('letsview', 'DJI Fly (LetsView)', 'letsview://').",
@@ -29,5 +29,5 @@
     "Run: docker build -t matanglawin-test . to confirm Docker image builds successfully with new dependencies"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification checks pass. On Linux, LetsViewSource.open() returns False gracefully as expected. pygetwindow raises NotImplementedError on Linux (not ImportError), so we catch both. Docker build succeeds with new dependencies. The 'letsview' key appears in the registry and detector correctly branches to create LetsViewSource when spec is 'letsview://'. mss installs fine cross-platform. Python 3.9 on host sandbox (not 3.11) but all code is compatible."
 }
