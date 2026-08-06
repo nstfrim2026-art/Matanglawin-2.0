@@ -163,7 +163,9 @@ class Detector:
             except Exception:
                 annotated, crack_present, crack_metadata = frame, False, []
 
-            jpeg_bytes = self._encode(annotated)
+            # Stream the RAW frame (no overlays) for a clean live feed.
+            # The annotated frame is only used for capture analysis.
+            jpeg_bytes = self._encode(frame)
             with self._lock:
                 self._latest_jpeg = jpeg_bytes
                 self._camera_connected = True
@@ -208,6 +210,10 @@ class Detector:
         with self._lock:
             self._source_key = pending
         self._video_source = vs if opened else None
+
+        # Update the capture manager with the current camera source name
+        self._capture_manager.set_camera_source(pending)
+
         if not opened:
             self._set_disconnected_frame()
 

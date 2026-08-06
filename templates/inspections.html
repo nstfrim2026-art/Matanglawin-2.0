@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MATANGLAWIN - Inspection History</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/logo-mark.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .inspections-container {
+      max-width: 1200px;
+      margin: 100px auto 40px;
+      padding: 0 20px;
+    }
+    .inspections-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .inspections-header h1 {
+      font-size: 1.8rem;
+      color: #fff;
+    }
+    .inspections-controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .inspections-controls input,
+    .inspections-controls select {
+      padding: 8px 12px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #eee;
+      font-size: 0.9rem;
+    }
+    .inspections-controls button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      background: #4a90d9;
+      color: #fff;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .inspections-controls button:hover {
+      background: #357abd;
+    }
+    .export-buttons {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .export-buttons a {
+      padding: 8px 16px;
+      border-radius: 6px;
+      background: #2d2d44;
+      color: #4a90d9;
+      text-decoration: none;
+      font-size: 0.85rem;
+      border: 1px solid #333;
+    }
+    .export-buttons a:hover {
+      background: #3d3d55;
+    }
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .summary-card {
+      background: #1a1a2e;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .summary-card .value {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #4a90d9;
+    }
+    .summary-card .label {
+      font-size: 0.8rem;
+      color: #aaa;
+      margin-top: 4px;
+    }
+    .inspections-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #1a1a2e;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .inspections-table th,
+    .inspections-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid #2d2d44;
+      font-size: 0.85rem;
+    }
+    .inspections-table th {
+      background: #2d2d44;
+      color: #aaa;
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+    }
+    .inspections-table td {
+      color: #ddd;
+    }
+    .inspections-table tr:hover td {
+      background: #222240;
+    }
+    .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 20px;
+    }
+    .pagination button {
+      padding: 8px 14px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #eee;
+      cursor: pointer;
+    }
+    .pagination button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .pagination button.active {
+      background: #4a90d9;
+      border-color: #4a90d9;
+    }
+    .no-data {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+      font-size: 1rem;
+    }
+    .back-link {
+      color: #4a90d9;
+      text-decoration: none;
+      margin-bottom: 16px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Navigation Bar -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-container">
+      <a href="/" class="nav-brand">
+        <img src="{{ url_for('static', filename='img/logo-mark.svg') }}" alt="Matanglawin logo" class="nav-logo">
+        <div class="nav-brand-text">
+          <span class="nav-brand-title">MATANGLAWIN</span>
+          <span class="nav-brand-tagline">SEE CRACKS. SAVE LIVES.</span>
+        </div>
+      </a>
+      <div class="nav-links">
+        <a href="/" class="nav-link">Dashboard</a>
+        <a href="/inspections" class="nav-link active">Inspections</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="inspections-container">
+    <a href="/" class="back-link">&larr; Back to Dashboard</a>
+
+    <div class="inspections-header">
+      <h1>Inspection History</h1>
+      <div class="inspections-controls">
+        <input type="text" id="searchInput" placeholder="Search by ID or date...">
+        <input type="date" id="dateFrom" title="From date">
+        <input type="date" id="dateTo" title="To date">
+        <button onclick="loadInspections(1)">Search</button>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards" id="summaryCards">
+      <div class="summary-card"><div class="value" id="statTotal">0</div><div class="label">Total Inspections</div></div>
+      <div class="summary-card"><div class="value" id="statCracks">0</div><div class="label">Confirmed Cracks</div></div>
+      <div class="summary-card"><div class="value" id="statAvgConf">0%</div><div class="label">Avg Confidence</div></div>
+      <div class="summary-card"><div class="value" id="statLargest">0</div><div class="label">Largest Crack (px)</div></div>
+      <div class="summary-card"><div class="value" id="statToday">0</div><div class="label">Today</div></div>
+    </div>
+
+    <!-- Export Buttons -->
+    <div class="export-buttons">
+      <a href="/api/export/csv">Export CSV</a>
+      <a href="/api/export/excel">Export Excel</a>
+    </div>
+
+    <!-- Inspections Table -->
+    <table class="inspections-table">
+      <thead>
+        <tr>
+          <th>Capture ID</th>
+          <th>Timestamp</th>
+          <th>Classification</th>
+          <th>Confidence</th>
+          <th>Area (px)</th>
+          <th>Camera</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="inspectionsBody">
+        <tr><td colspan="7" class="no-data">Loading...</td></tr>
+      </tbody>
+    </table>
+
+    <div class="pagination" id="pagination"></div>
+  </div>
+
+  <script>
+    let currentPage = 1;
+    const perPage = 20;
+
+    async function loadSummary() {
+      try {
+        const resp = await fetch('/api/summary');
+        const data = await resp.json();
+        document.getElementById('statTotal').textContent = data.total_inspections;
+        document.getElementById('statCracks').textContent = data.total_confirmed_cracks;
+        document.getElementById('statAvgConf').textContent = (data.average_confidence * 100).toFixed(1) + '%';
+        document.getElementById('statLargest').textContent = data.largest_crack;
+        document.getElementById('statToday').textContent = data.inspections_today;
+      } catch (e) {
+        console.error('Failed to load summary:', e);
+      }
+    }
+
+    async function loadInspections(page) {
+      currentPage = page || 1;
+      const search = document.getElementById('searchInput').value;
+      const dateFrom = document.getElementById('dateFrom').value;
+      const dateTo = document.getElementById('dateTo').value;
+
+      let url = `/api/inspections?page=${currentPage}&per_page=${perPage}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
+      if (dateFrom) url += `&date_from=${dateFrom}`;
+      if (dateTo) url += `&date_to=${dateTo}`;
+
+      try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        renderTable(data.items);
+        renderPagination(data.total, data.page, data.per_page);
+      } catch (e) {
+        document.getElementById('inspectionsBody').innerHTML =
+          '<tr><td colspan="7" class="no-data">Failed to load inspections</td></tr>';
+      }
+    }
+
+    function renderTable(items) {
+      const tbody = document.getElementById('inspectionsBody');
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="no-data">No inspections found</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(item => `
+        <tr>
+          <td>${item.capture_id || ''}</td>
+          <td>${item.timestamp ? new Date(item.timestamp).toLocaleString() : ''}</td>
+          <td>${item.classification || ''}</td>
+          <td>${item.confidence ? (item.confidence * 100).toFixed(1) + '%' : ''}</td>
+          <td>${item.crack_area || ''}</td>
+          <td>${item.camera_source || ''}</td>
+          <td>
+            <a href="/api/export/pdf/${item.capture_id}" style="color:#4a90d9;text-decoration:none;">PDF</a>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function renderPagination(total, page, perPage) {
+      const totalPages = Math.ceil(total / perPage);
+      const container = document.getElementById('pagination');
+      if (totalPages <= 1) { container.innerHTML = ''; return; }
+
+      let html = '';
+      html += `<button ${page <= 1 ? 'disabled' : ''} onclick="loadInspections(${page - 1})">Prev</button>`;
+      for (let i = 1; i <= Math.min(totalPages, 7); i++) {
+        html += `<button class="${i === page ? 'active' : ''}" onclick="loadInspections(${i})">${i}</button>`;
+      }
+      html += `<button ${page >= totalPages ? 'disabled' : ''} onclick="loadInspections(${page + 1})">Next</button>`;
+      container.innerHTML = html;
+    }
+
+    // Initial load
+    loadSummary();
+    loadInspections(1);
+  </script>
+</body>
+</html>

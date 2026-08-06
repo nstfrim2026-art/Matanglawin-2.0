@@ -37,10 +37,14 @@ import sys
 import time
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import (
+    Flask, Response, jsonify, render_template, request, send_file,
+)
 
 from detector import Detector
 from inference_core import get_model
+from inspection_db import get_inspection_by_id, get_inspections, get_summary_stats, init_db
+from report_generator import generate_excel_export, generate_full_csv_export
 from video_source import build_registry
 
 # ---------------------------------------------------------------------------
@@ -64,6 +68,9 @@ app = Flask(
     template_folder=str(RESOURCE_DIR / "templates"),
     static_folder=str(RESOURCE_DIR / "static"),
 )
+
+# Initialize inspection database
+init_db()
 
 REGISTRY = build_registry(ip_camera_url=IP_CAMERA_URL, drone_url=DRONE_URL)
 detector = Detector(
@@ -203,6 +210,109 @@ def capture_reset():
     cm = detector.get_capture_manager()
     cm.reset()
     return jsonify({"ok": True, "state": cm.get_state()})
+
+
+# ---------------------------------------------------------------------------
+# Inspection history & export endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/inspections", methods=["GET"])
+def inspections_page():
+    """Serve the inspection history HTML page."""
+    return render_template("inspections.html", sources=detector.available_sources())
+
+
+@app.route("/api/inspections", methods=["GET"])
+def api_inspections():
+    """Return paginated inspection list from SQLite with optional filtering."""
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    search = request.args.get("search", None, type=str)
+    date_from = request.args.get("date_from", None, type=str)
+    date_to = request.args.get("date_to", None, type=str)
+
+    result = get_inspections(
+        page=page,
+        per_page=per_page,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return jsonify(result)
+
+
+@app.route("/api/inspections/<capture_id>", methods=["GET"])
+def api_inspection_detail(capture_id):
+    """Return a single inspection record by capture_id."""
+    record = get_inspection_by_id(capture_id)
+    if record is None:
+        return jsonify({"error": "Inspection not found"}), 404
+    return jsonify(record)
+
+
+@app.route("/api/summary", methods=["GET"])
+def api_summary():
+    """Return dashboard summary statistics."""
+    stats = get_summary_stats()
+    return jsonify(stats)
+
+
+@app.route("/api/export/csv", methods=["GET"])
+def api_export_csv():
+    """Export all inspection records as a CSV file download."""
+    import tempfile
+
+    result = get_inspections(page=1, per_page=100000)
+    items = result["items"]
+
+    tmp_dir = tempfile.mkdtemp()
+    output_path = os.path.join(tmp_dir, "inspections_export.csv")
+    generate_full_csv_export(items, output_path)
+
+    return send_file(
+        output_path,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="inspections_export.csv",
+    )
+
+
+@app.route("/api/export/excel", methods=["GET"])
+def api_export_excel():
+    """Export all inspection records as an Excel file download."""
+    import tempfile
+
+    result = get_inspections(page=1, per_page=100000)
+    items = result["items"]
+
+    tmp_dir = tempfile.mkdtemp()
+    output_path = os.path.join(tmp_dir, "inspections_export.xlsx")
+    generate_excel_export(items, output_path)
+
+    return send_file(
+        output_path,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="inspections_export.xlsx",
+    )
+
+
+@app.route("/api/export/pdf/<capture_id>", methods=["GET"])
+def api_export_pdf(capture_id):
+    """Return the PDF report for a specific inspection."""
+    record = get_inspection_by_id(capture_id)
+    if record is None:
+        return jsonify({"error": "Inspection not found"}), 404
+
+    report_path = record.get("report_path")
+    if report_path and os.path.isfile(report_path):
+        return send_file(
+            report_path,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"{capture_id}_report.pdf",
+        )
+    return jsonify({"error": "Report file not found"}), 404
 
 
 def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:

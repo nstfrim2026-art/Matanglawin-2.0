@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 matanglawin_data/
 captures/
+inspections.db
 
 # PyInstaller build output
 build/

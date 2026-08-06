@@ -1,10 +1,13 @@
 """
 capture_manager.py - Automatic image capture workflow manager.
 
-Implements a two-stage inspection pipeline:
+Implements a research-grade inspection pipeline:
   Stage 1: Continuous live monitoring for possible cracks.
-  Stage 2: Automatic high-confidence image capture followed by detailed
-           crack analysis on the captured image.
+  Stage 2: Temporal verification (5 consecutive above-threshold frames).
+  Stage 3: Image quality validation (blur, brightness, exposure).
+  Stage 4: Full crack analysis on the captured frame.
+  Stage 5: Advanced crack validation to reject false positives.
+  Stage 6: Save confirmed inspection (images, overlays, metadata, reports).
 
 State machine:
   monitoring -> threshold_reached -> capturing ->
@@ -12,13 +15,20 @@ State machine:
 
 Thread-safe: all state mutations are protected by a threading lock.
 Capture work runs in a background thread to avoid blocking the detector loop.
+
+Output directory structure:
+  captures/
+    images/        - Original high-quality captured frames
+    overlays/      - Annotated frames with segmentation overlays
+    metadata/      - JSON metadata per inspection
+    reports/       - PDF inspection reports
+    exports/       - Shared CSV file for all inspections
 """
 
 from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -27,7 +37,11 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from crack_validator import validate_cracks
+from image_quality import validate_image_quality
 from inference_core import annotate_frame
+from inspection_db import init_db, insert_inspection
+from report_generator import generate_csv_record, generate_pdf_report
 
 
 # Valid states in the capture workflow
@@ -49,8 +63,8 @@ MIN_COOLDOWN = 1.0
 # How long to hold analysis_complete state before transitioning to cooldown
 ANALYSIS_COMPLETE_HOLD_SECONDS = 2.0
 
-# Regex pattern for parsing capture filenames (e.g., crack_0001.jpg, crack_10000.jpg)
-_CAPTURE_FILENAME_RE = re.compile(r"^crack_(\d+)\.jpg$")
+# Temporal verification: consecutive frames required above threshold
+VERIFICATION_FRAME_COUNT = 5
 
 
 class CaptureManager:
@@ -80,6 +94,10 @@ class CaptureManager:
         self._state_change_time: float = time.monotonic()
         self._cooldown_start: float = 0.0
 
+        # Temporal verification state
+        self._consecutive_detections: int = 0
+        self._verification_buffer: list = []  # list of (frame, metadata) tuples
+
         # Latest capture results (kept in memory for serving to frontend)
         self._latest_capture_jpeg: Optional[bytes] = None
         self._latest_metadata: Optional[dict] = None
@@ -88,10 +106,23 @@ class CaptureManager:
         # Flag to prevent re-entrant capture triggers while one is in progress
         self._capture_in_progress = False
 
-        # Captures directory
+        # Camera source name for metadata (set externally by Detector)
+        self._camera_source: str = "unknown"
+
+        # Captures directory (base)
         self._captures_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "captures"
         )
+
+        # Sub-directories
+        self._images_dir = os.path.join(self._captures_dir, "images")
+        self._overlays_dir = os.path.join(self._captures_dir, "overlays")
+        self._metadata_dir = os.path.join(self._captures_dir, "metadata")
+        self._reports_dir = os.path.join(self._captures_dir, "reports")
+        self._exports_dir = os.path.join(self._captures_dir, "exports")
+
+        # Initialize database
+        init_db()
 
         # Initialize capture count from existing files
         self._capture_count = self._scan_existing_captures()
@@ -126,12 +157,19 @@ class CaptureManager:
         with self._lock:
             return self._state
 
+    def set_camera_source(self, source_name: str) -> None:
+        """Set the current camera source name for metadata recording."""
+        with self._lock:
+            self._camera_source = source_name
+
     def reset(self) -> None:
         """Reset the state machine back to monitoring."""
         with self._lock:
             self._state = "monitoring"
             self._state_change_time = time.monotonic()
             self._capture_in_progress = False
+            self._consecutive_detections = 0
+            self._verification_buffer = []
 
     # -- Public query methods ------------------------------------------
 
@@ -143,6 +181,8 @@ class CaptureManager:
                 "threshold": self._threshold,
                 "cooldown": self._cooldown,
                 "capture_count": self._capture_count,
+                "consecutive_detections": self._consecutive_detections,
+                "verification_required": VERIFICATION_FRAME_COUNT,
             }
             if self._latest_metadata is not None:
                 result["latest_analysis"] = self._latest_metadata
@@ -161,8 +201,8 @@ class CaptureManager:
         """
         Called by detector.py after each live inference pass.
 
-        Checks if any detection meets the threshold and triggers the
-        capture workflow. This method handles state transitions.
+        Implements temporal verification before triggering capture.
+        This method handles state transitions.
         The actual capture work runs in a background thread.
         """
         with self._lock:
@@ -178,32 +218,73 @@ class CaptureManager:
     def _handle_monitoring(
         self, raw_frame: np.ndarray, crack_metadata_list: list
     ) -> None:
-        """Check if any detection meets the threshold directly."""
+        """
+        Temporal verification: require VERIFICATION_FRAME_COUNT consecutive
+        frames with max confidence >= threshold before triggering capture.
+        """
+        with self._lock:
+            threshold = self._threshold
+            if self._capture_in_progress:
+                return
+
         if not crack_metadata_list:
+            # No detections - reset consecutive counter
+            with self._lock:
+                self._consecutive_detections = 0
+                self._verification_buffer = []
             return
 
         max_conf = max(m["confidence"] for m in crack_metadata_list)
 
-        with self._lock:
-            threshold = self._threshold
-            # Guard against re-entrant triggers
-            if self._capture_in_progress:
-                return
-
         if max_conf >= threshold:
-            # Threshold met - start capture in background thread
+            with self._lock:
+                self._consecutive_detections += 1
+                self._verification_buffer.append(
+                    (raw_frame.copy(), list(crack_metadata_list))
+                )
+                # Keep buffer size bounded
+                if len(self._verification_buffer) > VERIFICATION_FRAME_COUNT:
+                    self._verification_buffer = self._verification_buffer[
+                        -VERIFICATION_FRAME_COUNT:
+                    ]
+                count = self._consecutive_detections
+        else:
+            # Below threshold - reset
+            with self._lock:
+                self._consecutive_detections = 0
+                self._verification_buffer = []
+            return
+
+        # Check if temporal verification has passed
+        if count >= VERIFICATION_FRAME_COUNT:
             with self._lock:
                 self._capture_in_progress = True
                 self._state = "threshold_reached"
                 self._state_change_time = time.monotonic()
 
-            # Copy the frame to avoid mutation by the detector loop
-            frame_copy = raw_frame.copy()
-            metadata_copy = list(crack_metadata_list)
+                # Pick the best frame from the verification buffer
+                # (highest confidence detection)
+                best_frame = None
+                best_metadata = None
+                best_conf = 0.0
+                for buf_frame, buf_meta in self._verification_buffer:
+                    frame_max = max(m["confidence"] for m in buf_meta)
+                    if frame_max > best_conf:
+                        best_conf = frame_max
+                        best_frame = buf_frame
+                        best_metadata = buf_meta
+
+                # Reset verification state
+                self._consecutive_detections = 0
+                self._verification_buffer = []
+
+            if best_frame is None:
+                best_frame = raw_frame.copy()
+                best_metadata = list(crack_metadata_list)
 
             capture_thread = threading.Thread(
                 target=self._capture_worker,
-                args=(frame_copy, metadata_copy),
+                args=(best_frame, best_metadata),
                 daemon=True,
             )
             capture_thread.start()
@@ -222,21 +303,33 @@ class CaptureManager:
         """
         Execute the full capture workflow in a background thread.
 
-        This avoids blocking the detector's inference loop.
-        All file I/O and secondary inference happen here.
+        Steps:
+          1. Image quality validation
+          2. Full analysis (annotate_frame on captured image)
+          3. Crack validation (filter false positives)
+          4. Save outputs (images, overlays, metadata, reports, DB)
         """
         try:
             with self._lock:
                 self._state = "capturing"
                 self._state_change_time = time.monotonic()
 
-            # Save the raw frame as high-quality JPEG
+            # Step 1: Image quality validation
+            quality_result = validate_image_quality(raw_frame)
+            if not quality_result["passed"]:
+                # Image quality too low - discard and return to monitoring
+                with self._lock:
+                    self._state = "monitoring"
+                    self._state_change_time = time.monotonic()
+                    self._capture_in_progress = False
+                return
+
+            # Encode the raw frame as high-quality JPEG
             timestamp = datetime.now(timezone.utc)
             ok, buf = cv2.imencode(
                 ".jpg", raw_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95]
             )
             if not ok:
-                # Failed to encode - go back to monitoring
                 with self._lock:
                     self._state = "monitoring"
                     self._state_change_time = time.monotonic()
@@ -249,7 +342,7 @@ class CaptureManager:
                 self._state = "analyzing"
                 self._state_change_time = time.monotonic()
 
-            # Run full analysis on the captured frame
+            # Step 2: Run full analysis on the captured frame
             try:
                 annotated, crack_present, analysis_metadata = annotate_frame(
                     raw_frame,
@@ -262,60 +355,147 @@ class CaptureManager:
                 crack_present = False
                 analysis_metadata = crack_metadata_list
 
+            # If no cracks found in re-analysis, discard
+            if not crack_present or not analysis_metadata:
+                with self._lock:
+                    self._state = "monitoring"
+                    self._state_change_time = time.monotonic()
+                    self._capture_in_progress = False
+                return
+
+            # Step 3: Advanced crack validation
+            # Try to get masks for validation (re-run lightweight check)
+            validated_metadata = validate_cracks(
+                analysis_metadata, raw_frame, masks=None
+            )
+
+            if not validated_metadata:
+                # All detections filtered as false positives
+                with self._lock:
+                    self._state = "monitoring"
+                    self._state_change_time = time.monotonic()
+                    self._capture_in_progress = False
+                return
+
             # Encode annotated frame as JPEG for display
             ok_ann, buf_ann = cv2.imencode(
                 ".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 95]
             )
             annotated_jpeg = buf_ann.tobytes() if ok_ann else raw_jpeg
 
-            # Build metadata
-            # Use the analysis results (re-run on captured frame) if available,
-            # otherwise fall back to the live detection metadata
-            final_metadata_list = (
-                analysis_metadata if analysis_metadata else crack_metadata_list
-            )
-
-            # Pick the highest-confidence detection as the primary result
-            if final_metadata_list:
-                primary = max(
-                    final_metadata_list, key=lambda m: m["confidence"]
-                )
-            else:
-                primary = {
-                    "classification": "Unknown",
-                    "confidence": 0.0,
-                    "area_px": 0,
-                    "bbox": [],
-                    "estimated_length_px": 0.0,
-                    "estimated_width_px": 0.0,
-                }
+            # Pick the highest-confidence validated detection as primary
+            primary = max(validated_metadata, key=lambda m: m["confidence"])
 
             with self._lock:
                 self._capture_count += 1
                 capture_num = self._capture_count
+                camera_source = self._camera_source
+                threshold = self._threshold
 
-            # Format filename
-            image_filename = f"crack_{capture_num:04d}.jpg"
-            json_filename = f"crack_{capture_num:04d}.json"
+            # Build capture ID
+            capture_id = f"INSP-{capture_num:05d}"
+            h, w = raw_frame.shape[:2]
+            image_resolution = f"{w}x{h}"
 
+            # Step 4: Save to new directory structure
+            os.makedirs(self._images_dir, exist_ok=True)
+            os.makedirs(self._overlays_dir, exist_ok=True)
+            os.makedirs(self._metadata_dir, exist_ok=True)
+            os.makedirs(self._reports_dir, exist_ok=True)
+            os.makedirs(self._exports_dir, exist_ok=True)
+
+            image_filename = f"{capture_id}.jpg"
+            image_path = os.path.join(self._images_dir, image_filename)
+            overlay_path = os.path.join(self._overlays_dir, image_filename)
+            metadata_path = os.path.join(
+                self._metadata_dir, f"{capture_id}.json"
+            )
+            report_path = os.path.join(
+                self._reports_dir, f"{capture_id}.pdf"
+            )
+            csv_path = os.path.join(self._exports_dir, "inspections.csv")
+
+            # Save raw image
+            with open(image_path, "wb") as f:
+                f.write(raw_jpeg)
+
+            # Save overlay image
+            with open(overlay_path, "wb") as f:
+                f.write(annotated_jpeg)
+
+            # Build metadata
             metadata = {
+                "capture_id": capture_id,
                 "timestamp": timestamp.isoformat(),
-                "image_filename": image_filename,
                 "capture_number": capture_num,
                 "classification": primary["classification"],
                 "confidence": primary["confidence"],
-                "estimated_length_px": primary["estimated_length_px"],
-                "estimated_width_px": primary["estimated_width_px"],
-                "area_px": primary["area_px"],
+                "crack_area": primary["area_px"],
+                "estimated_length": primary["estimated_length_px"],
+                "estimated_width": primary["estimated_width_px"],
                 "bbox": primary["bbox"],
-                "crack_metadata_list": final_metadata_list,
+                "camera_source": camera_source,
+                "detection_threshold": threshold,
+                "image_resolution": image_resolution,
+                "image_path": image_path,
+                "overlay_path": overlay_path,
+                "metadata_path": metadata_path,
+                "report_path": report_path,
+                "all_detections": validated_metadata,
+                "quality_check": quality_result,
             }
 
-            # Save to disk (inside background thread - no race condition)
-            self._save_capture(image_filename, json_filename, raw_jpeg, metadata)
+            # Save JSON metadata
+            with open(metadata_path, "w") as f:
+                json.dump(metadata, f, indent=2, default=str)
 
-            # Rotate old captures if we exceed the limit
-            self._rotate_captures()
+            # Generate PDF report
+            try:
+                generate_pdf_report(metadata, image_path, overlay_path, report_path)
+            except Exception:
+                pass  # Non-fatal: report generation failure should not stop workflow
+
+            # Append to CSV
+            csv_record = {
+                "capture_id": capture_id,
+                "timestamp": timestamp.isoformat(),
+                "classification": primary["classification"],
+                "confidence": primary["confidence"],
+                "crack_area": primary["area_px"],
+                "estimated_length": primary["estimated_length_px"],
+                "estimated_width": primary["estimated_width_px"],
+                "bbox": str(primary["bbox"]),
+                "camera_source": camera_source,
+                "detection_threshold": threshold,
+                "image_resolution": image_resolution,
+            }
+            try:
+                generate_csv_record(csv_record, csv_path)
+            except Exception:
+                pass
+
+            # Insert into SQLite database
+            db_record = {
+                "capture_id": capture_id,
+                "timestamp": timestamp.isoformat(),
+                "confidence": primary["confidence"],
+                "crack_area": primary["area_px"],
+                "estimated_length": primary["estimated_length_px"],
+                "estimated_width": primary["estimated_width_px"],
+                "bbox": primary["bbox"],
+                "camera_source": camera_source,
+                "detection_threshold": threshold,
+                "image_resolution": image_resolution,
+                "classification": primary["classification"],
+                "image_path": image_path,
+                "overlay_path": overlay_path,
+                "metadata_path": metadata_path,
+                "report_path": report_path,
+            }
+            try:
+                insert_inspection(db_record)
+            except Exception:
+                pass
 
             # Store in memory for frontend access
             with self._lock:
@@ -324,7 +504,7 @@ class CaptureManager:
                 self._state = "analysis_complete"
                 self._state_change_time = time.monotonic()
 
-            # Hold analysis_complete state long enough for frontend to observe it
+            # Hold analysis_complete state for frontend to observe
             time.sleep(ANALYSIS_COMPLETE_HOLD_SECONDS)
 
             with self._lock:
@@ -341,70 +521,19 @@ class CaptureManager:
             with self._lock:
                 self._capture_in_progress = False
 
-    def _save_capture(
-        self,
-        image_filename: str,
-        json_filename: str,
-        jpeg_bytes: bytes,
-        metadata: dict,
-    ) -> None:
-        """Save capture image and metadata JSON to the captures/ directory."""
-        os.makedirs(self._captures_dir, exist_ok=True)
-
-        image_path = os.path.join(self._captures_dir, image_filename)
-        json_path = os.path.join(self._captures_dir, json_filename)
-
-        with open(image_path, "wb") as f:
-            f.write(jpeg_bytes)
-
-        with open(json_path, "w") as f:
-            json.dump(metadata, f, indent=2)
-
-    def _rotate_captures(self) -> None:
-        """Remove oldest captures if total count exceeds max_captures."""
-        if not os.path.isdir(self._captures_dir):
-            return
-
-        # Collect all capture files sorted by number
-        captures = []
-        for fname in os.listdir(self._captures_dir):
-            match = _CAPTURE_FILENAME_RE.match(fname)
-            if match:
-                num = int(match.group(1))
-                captures.append((num, fname))
-
-        if len(captures) <= self._max_captures:
-            return
-
-        # Sort by capture number (ascending) and remove oldest
-        captures.sort(key=lambda x: x[0])
-        to_remove = captures[: len(captures) - self._max_captures]
-
-        for num, fname in to_remove:
-            # Remove both image and JSON
-            image_path = os.path.join(self._captures_dir, fname)
-            json_name = fname.replace(".jpg", ".json")
-            json_path = os.path.join(self._captures_dir, json_name)
-
-            try:
-                os.remove(image_path)
-            except OSError:
-                pass
-            try:
-                os.remove(json_path)
-            except OSError:
-                pass
-
     def _scan_existing_captures(self) -> int:
-        """Scan captures/ directory to find the highest existing capture number."""
-        if not os.path.isdir(self._captures_dir):
+        """Scan captures/images/ directory to find the highest existing capture number."""
+        if not os.path.isdir(self._images_dir):
             return 0
 
         max_num = 0
-        for fname in os.listdir(self._captures_dir):
-            match = _CAPTURE_FILENAME_RE.match(fname)
-            if match:
-                num = int(match.group(1))
-                if num > max_num:
-                    max_num = num
+        for fname in os.listdir(self._images_dir):
+            if fname.startswith("INSP-") and fname.endswith(".jpg"):
+                try:
+                    num_str = fname[5:10]  # INSP-XXXXX.jpg
+                    num = int(num_str)
+                    if num > max_num:
+                        max_num = num
+                except (ValueError, IndexError):
+                    pass
         return max_num
