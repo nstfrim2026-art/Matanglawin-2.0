@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Backend improvements: enhance ML preprocessing (CLAHE, gamma, sharpening, noise reduction), strengthen crack validation (stricter thresholds, DJI UI rejection, adaptive confidence), improve system stability (thread watchdog, auto-recovery, error resilience), and replace LetsView mss capture with Windows Graphics Capture API stub.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In inference_core.py, add a preprocess_frame() function before YOLO inference that applies: (a) CLAHE on the L channel of LAB color space, (b) gamma correction (gamma=1.2), (c) light unsharp mask sharpening, (d) bilateral filter for noise reduction while preserving edges. Call this in annotate_frame() before model.predict().",
     "2. In inference_core.py, raise the default confidence threshold from 0.25 to 0.40 in annotate_frame() function signature. Also update app.py CONF default from 0.25 to 0.40.",
@@ -28,5 +28,5 @@
     "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 8 steps implemented and verified. All integration tests pass (including new tests for preprocess_frame, DJI UI zone rejection, confidence default, and time-spread temporal verification). The winsdk-based LetsViewSource gracefully returns False on Linux since winsdk is Windows-only. The detector heartbeat and backoff mechanisms are in place. The capture_manager timeout watchdog runs as a separate daemon thread."
 }
