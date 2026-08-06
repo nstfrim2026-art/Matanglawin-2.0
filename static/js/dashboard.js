@@ -401,6 +401,39 @@
   }
 
   // -----------------------------------------------------------------------
+  // Dashboard summary polling (/api/summary every 5s)
+  // -----------------------------------------------------------------------
+
+  const SUMMARY_POLL_MS = 5000;
+
+  async function pollSummary() {
+    try {
+      var res = await fetch("/api/summary", { cache: "no-store" });
+      if (!res.ok) return;
+      var data = await res.json();
+
+      var elTotal = document.getElementById("summaryTotalInspections");
+      var elCracks = document.getElementById("summaryConfirmedCracks");
+      var elAvgConf = document.getElementById("summaryAvgConfidence");
+      var elLargest = document.getElementById("summaryLargestCrack");
+      var elAvgSize = document.getElementById("summaryAvgCrackSize");
+      var elToday = document.getElementById("summaryToday");
+
+      if (elTotal) elTotal.textContent = data.total_inspections || 0;
+      if (elCracks) elCracks.textContent = data.total_confirmed_cracks || 0;
+      if (elAvgConf) {
+        var avgConf = data.average_confidence || 0;
+        elAvgConf.textContent = (avgConf * 100).toFixed(1) + "%";
+      }
+      if (elLargest) elLargest.textContent = (data.largest_crack || 0) + " px";
+      if (elAvgSize) elAvgSize.textContent = (data.average_crack_size || 0) + " px";
+      if (elToday) elToday.textContent = data.inspections_today || 0;
+    } catch (err) {
+      /* ignore - summary is non-critical */
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Init
   // -----------------------------------------------------------------------
 
@@ -413,8 +446,10 @@
     // Start polling
     pollStatus();
     pollAnalysis();
+    pollSummary();
     setInterval(pollStatus, STATUS_POLL_MS);
     setInterval(pollAnalysis, ANALYSIS_POLL_MS);
+    setInterval(pollSummary, SUMMARY_POLL_MS);
 
     // Scroll-based nav highlighting
     window.addEventListener("scroll", updateActiveNav);

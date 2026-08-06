@@ -768,6 +768,56 @@ body {
 }
 
 /* -------------------------------------------------------------------------
+   Dashboard Summary Section
+   ------------------------------------------------------------------------- */
+
+.dashboard-summary-section {
+  padding: 80px 0;
+  background: var(--light-bg);
+}
+
+.dashboard-summary-section .section-title {
+  color: var(--text-dark);
+}
+
+.dashboard-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 24px;
+}
+
+.dashboard-summary-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  padding: 28px 20px;
+  text-align: center;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid #e8e8e8;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.dashboard-summary-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.dashboard-summary-value {
+  font-size: 2rem;
+  font-weight: 800;
+  color: var(--primary-red);
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+
+.dashboard-summary-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-gray);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* -------------------------------------------------------------------------
    Contact Section
    ------------------------------------------------------------------------- */
 
