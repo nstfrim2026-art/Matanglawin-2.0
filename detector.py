@@ -176,7 +176,7 @@ class Detector:
                         imgsz=self._imgsz,
                     )
                 except Exception:
-                    annotated, crack_present, crack_metadata = frame, False, []
+                    annotated, crack_present, crack_metadata, _masks = frame, False, [], None
 
                 # Stream the RAW frame (no overlays) for a clean live feed.
                 # The annotated frame is only used for capture analysis.
