@@ -781,15 +781,17 @@ body {
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding: 18px 24px;
+  padding: 24px 32px;
   margin-bottom: 24px;
-  background: linear-gradient(135deg, #d21f1f, #ff6b00);
+  background: #c0392b;
+  box-shadow: 0 0 24px rgba(192, 57, 43, 0.9), 0 0 48px rgba(192, 57, 43, 0.5);
   border-radius: var(--radius);
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 800;
   color: #ffffff;
   text-align: center;
   letter-spacing: 2px;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.8);
   z-index: 100;
   animation: none;
 }
@@ -801,7 +803,7 @@ body {
 
 @keyframes bannerBlink {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50% { opacity: 0.2; }
 }
 
 /* -------------------------------------------------------------------------
@@ -956,6 +958,15 @@ body {
   font-size: 0.72rem;
   color: rgba(255, 255, 255, 0.45);
   letter-spacing: 0.3px;
+}
+
+.crack-confirmed-heading {
+  margin-top: 14px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #22c55e;
+  text-align: center;
+  letter-spacing: 1px;
 }
 
 /* -------------------------------------------------------------------------

@@ -301,11 +301,7 @@
   function renderCaptureAnalysis(analysis) {
     if (!analysisContent) return;
 
-    var confidence = (analysis.confidence || 0) * 100;
-    var classification = analysis.classification || "Unknown";
     var timestamp = analysis.timestamp || "";
-    var colorClass = getConfidenceColor(confidence);
-    var classClass = getClassificationClass(classification);
 
     var html = "";
     html += '<div class="capture-image-container">';
@@ -314,37 +310,13 @@
       encodeURIComponent(timestamp) +
       '" alt="Captured crack analysis">';
     html += "</div>";
-    html += '<div class="crack-entry">';
-    html +=
-      '<span class="crack-classification ' +
-      classClass +
-      '">' +
-      classification +
-      "</span>";
-    html += '<div class="severity-row">';
-    html += '<div class="severity-label">';
-    html += "<span>Confidence</span>";
-    html +=
-      '<span class="severity-value">' +
-      Math.round(confidence) +
-      "%</span>";
-    html += "</div>";
-    html += '<div class="severity-bar">';
-    html +=
-      '<div class="severity-fill ' +
-      colorClass +
-      '" style="width: ' +
-      confidence +
-      '%"></div>';
-    html += "</div>";
-    html += "</div>";
+    html += '<div class="crack-confirmed-heading">&#10004; CRACK CONFIRMED</div>';
     if (timestamp) {
       html +=
         '<div class="capture-timestamp">Captured: ' +
         timestamp +
         "</div>";
     }
-    html += "</div>";
 
     analysisContent.innerHTML = html;
   }
@@ -376,8 +348,9 @@
         AudioManager.play();
       }
 
-      // Hide banner when state returns to monitoring or cooldown
-      if (state === "monitoring" || state === "cooldown") {
+      // Hide banner and reset only when state returns to monitoring
+      // (banner stays visible during cooldown so the warning remains on screen)
+      if (state === "monitoring") {
         hideAlertBanner();
         AudioManager.resetForNewCapture();
       }
