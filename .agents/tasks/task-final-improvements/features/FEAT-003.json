@@ -2,7 +2,7 @@
   "id": "FEAT-003",
   "type": "fix",
   "description": "Address 7 review findings: remove DB lock contention, move LetsView per-frame import, delete inspection files on DELETE, remove CSV export 10k cap, add logging to capture worker exceptions, document no-auth as known limitation, add defensive comment for mask-metadata coupling.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In inspection_db.py: Remove the global _DB_LOCK and all `with _DB_LOCK:` wrappers. SQLite WAL mode (already enabled) supports concurrent readers; rely on busy_timeout for write serialization.",
     "2. In letsview_source.py: Move `import winsdk.windows.graphics.imaging as imaging` out of the read() method. Cache it at module level with the other winsdk imports (inside the try/except block).",
@@ -26,5 +26,5 @@
     "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py"
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 7 review issues addressed. Removed _DB_LOCK and threading import from inspection_db.py. Moved winsdk.windows.graphics.imaging to module-level import. DELETE endpoint queries record before deletion to get file paths and then os.unlink()s them. Added get_all_inspections() function to inspection_db.py and updated CSV/Excel exports to use it (no more 10k cap). Added logging module and logger.exception() to capture_manager _capture_worker. Added auth limitation comment before DELETE/PATCH routes. Added positional coupling comment in crack_validator validate_cracks loop. All integration tests pass."
 }
