@@ -1,0 +1,22 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Environment setup and baseline verification. Install all dependencies including new ones (fpdf2, openpyxl, Pillow), verify all existing modules import cleanly, and confirm the Flask app can start and respond to /health.",
+  "status": "completed",
+  "steps": [
+    "Activate the existing venv at /projects/sandbox/Matanglawin-2.0/venv and install torch/torchvision CPU-only, then pip install -r requirements.txt, then pip install fpdf2 openpyxl Pillow",
+    "Run python -c to import all existing modules: app, detector, capture_manager, inference_core, video_source, letsview_source",
+    "Run Flask test client check: from app import app; client = app.test_client(); assert client.get('/health').status_code == 200",
+    "Confirm the baseline is green before proceeding with changes"
+  ],
+  "acceptance_criteria": [
+    "All pip installs complete without errors",
+    "All module imports succeed without errors",
+    "Flask /health endpoint returns 200"
+  ],
+  "verification": [
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"from app import app; client = app.test_client(); r = client.get('/health'); print(r.status_code); assert r.status_code == 200\""
+  ],
+  "blocked_reason": null,
+  "findings": "All pip installs completed without errors. torch 2.8.0+cpu, fpdf2 2.8.4, openpyxl 3.1.5, Pillow installed. All 6 existing modules (app, detector, capture_manager, inference_core, video_source, letsview_source) import cleanly. Flask /health endpoint returns 200. Ultralytics settings file was auto-created on first import. pip version 21.3.1 in use (upgrade available but not required). Baseline is green."
+}

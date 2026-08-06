@@ -1,0 +1,38 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Core backend overhaul: (1) Remove overlays from live feed so detector sends raw frames as MJPEG. (2) Add temporal verification requiring 5 consecutive frames above threshold before triggering capture. (3) Add image quality validation (blur, brightness, exposure) that discards bad captures. (4) Add advanced crack validation to reduce false positives (min area, min length, aspect ratio, morphological filtering, edge consistency, isolated blob rejection). (5) Create SQLite database for inspection records. (6) Restructure captures/ into subdirectories (images/, overlays/, metadata/, reports/, exports/). (7) Generate overlay image, JSON metadata, CSV record, and PDF inspection report for each confirmed capture. (8) Add export endpoints (CSV, Excel, PDF) and inspection history query endpoint. (9) Add dashboard summary stats endpoint.",
+  "status": "pending",
+  "steps": [
+    "Create a new module image_quality.py with functions: check_blur(frame) using Laplacian variance, check_brightness(frame) checking mean luminance is in acceptable range, check_exposure(frame) checking histogram distribution. Return a dict with pass/fail and details.",
+    "Create a new module crack_validator.py with function validate_cracks(crack_metadata_list, frame, masks) that filters out false positives using: minimum crack area (e.g. 100px), minimum crack length (e.g. 20px), aspect ratio validation (cracks should be elongated, ratio > 2), morphological filtering (erode+dilate to remove noise), edge consistency (check contour smoothness via approxPolyDP), isolated blob rejection (reject if contour area is very small relative to bounding rect), prefer long continuous structures. Returns filtered crack_metadata_list.",
+    "Create a new module inspection_db.py that sets up an SQLite database (inspections.db in project root) with a table 'inspections' containing columns: id INTEGER PRIMARY KEY, capture_id TEXT UNIQUE, timestamp TEXT, confidence REAL, crack_area INTEGER, estimated_length REAL, estimated_width REAL, bbox TEXT (JSON), camera_source TEXT, detection_threshold REAL, image_resolution TEXT, classification TEXT, image_path TEXT, overlay_path TEXT, metadata_path TEXT, report_path TEXT. Provide functions: init_db(), insert_inspection(data), get_inspections(filters), get_summary_stats(), get_inspection_by_id(capture_id).",
+    "Create a new module report_generator.py with functions: generate_pdf_report(inspection_data, image_path, overlay_path, output_path) using fpdf2 to create a professional inspection report with title, metadata table, images, and findings. generate_csv_record(inspection_data, csv_path) that appends a row to a shared CSV file. generate_excel_export(inspections_list, output_path) using openpyxl.",
+    "Modify detector.py: In the _run() loop, after calling annotate_frame(), store crack_present and crack_metadata but DO NOT use the annotated frame for the MJPEG stream. Instead, encode the RAW frame as JPEG for _latest_jpeg. The annotated frame is discarded at the live-feed level. Still pass crack_metadata to capture_manager.process_frame().",
+    "Rewrite capture_manager.py to implement: (a) Temporal verification - add a consecutive_detections counter and a verification_frames buffer. In _handle_monitoring(), increment counter when max_confidence >= threshold, reset to 0 when not. Only trigger capture when counter reaches 5 (VERIFICATION_FRAME_COUNT = 5). (b) After verification passes, capture the best frame from the verification buffer. (c) Run image_quality checks on the captured frame - if it fails, discard and return to monitoring. (d) Run the full annotate_frame() on the captured frame to get the overlay. (e) Run crack_validator on the results - if all cracks are filtered out, discard and return to monitoring. (f) Save outputs to new directory structure: captures/images/CAPTURE_ID.jpg (raw), captures/overlays/CAPTURE_ID.jpg (annotated), captures/metadata/CAPTURE_ID.json, captures/reports/CAPTURE_ID.pdf. (g) Append to captures/exports/inspections.csv. (h) Insert record into SQLite database via inspection_db. (i) Store metadata including capture_id, timestamp, confidence, crack_area, estimated_length, estimated_width, bbox, camera_source, detection_threshold, image_resolution.",
+    "Add a method to CaptureManager or Detector to expose the current camera source name for metadata.",
+    "Add new Flask routes in app.py: GET /api/inspections (with query params: page, per_page, search, date_from, date_to) returns paginated inspection list from SQLite. GET /api/inspections/<capture_id> returns single inspection detail. GET /api/summary returns dashboard summary stats. GET /api/export/csv returns CSV file download. GET /api/export/excel returns Excel file download. GET /api/export/pdf/<capture_id> returns the PDF report for a specific inspection. GET /inspections serves the inspection history HTML page.",
+    "Update requirements.txt to add fpdf2, openpyxl, Pillow as dependencies.",
+    "Update Dockerfile to install the new dependencies (they should be pulled in via updated requirements.txt)."
+  ],
+  "acceptance_criteria": [
+    "The /video_feed endpoint streams raw camera frames without any overlays or bounding boxes",
+    "detector.py still runs inference on every frame but only uses results for crack_present status and capture_manager, not for the MJPEG stream",
+    "Temporal verification requires 5 consecutive frames above threshold before triggering capture",
+    "Image quality validation rejects blurry/dark/overexposed frames and returns to monitoring",
+    "Crack validation filters out false positives from shadows/textures using min area, min length, aspect ratio, morphological filtering, edge consistency",
+    "SQLite database stores all inspection records with full metadata",
+    "Each confirmed capture produces: raw image, overlay image, JSON metadata, CSV record, PDF report",
+    "Captures are saved to captures/images/, captures/overlays/, captures/metadata/, captures/reports/, captures/exports/",
+    "API endpoints /api/inspections, /api/summary, /api/export/csv, /api/export/excel, /api/export/pdf/<id> all respond correctly",
+    "All existing endpoints (/status, /capture/status, /capture/threshold, /capture/image, /capture/cooldown, /capture/reset) still work",
+    "All modules import without errors"
+  ],
+  "verification": [
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"import image_quality; import crack_validator; import inspection_db; import report_generator; print('All new modules import OK')\"",
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"from app import app; client = app.test_client(); r = client.get('/health'); assert r.status_code == 200; r2 = client.get('/api/summary'); assert r2.status_code == 200; r3 = client.get('/api/inspections'); assert r3.status_code == 200; print('All endpoints OK')\"",
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"from inspection_db import init_db, get_summary_stats; init_db(); stats = get_summary_stats(); print('DB OK:', stats)\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

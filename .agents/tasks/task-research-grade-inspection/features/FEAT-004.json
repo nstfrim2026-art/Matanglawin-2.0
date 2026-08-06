@@ -1,0 +1,37 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Integration testing and final wiring. Ensure all components work together end-to-end: the detector sends raw frames to the live feed, inference runs silently in background, temporal verification accumulates 5 frames, image quality gate works, crack validation filters noise, captures produce all artifacts, database records are created, the inspections page can query them, exports work, and the dashboard summary displays correct stats. Also ensure Dockerfile builds cleanly with all new dependencies.",
+  "status": "pending",
+  "steps": [
+    "Run a comprehensive import test: import all modules (app, detector, capture_manager, inference_core, video_source, image_quality, crack_validator, inspection_db, report_generator) and verify no import errors",
+    "Run Flask test client checks against all new and existing endpoints: /health, /status, /sources, /capture/status, /api/inspections, /api/summary, /inspections page",
+    "Verify the database initializes correctly: call init_db(), insert a test record, query it back, verify summary stats reflect it, then clean up",
+    "Verify report_generator can produce a PDF given test data (create a dummy image, generate report, confirm PDF file is created)",
+    "Verify crack_validator correctly filters: create test cases with small blobs (should be rejected), elongated cracks (should pass), and isolated noise (should be rejected)",
+    "Verify image_quality module: test with a completely black frame (should fail brightness), a very blurry frame (should fail blur check), a normal frame (should pass)",
+    "Verify the temporal verification logic in capture_manager: instantiate CaptureManager, call process_frame with crack_metadata above threshold for 4 frames (should NOT trigger capture), then 5th frame (should trigger)",
+    "Build the Docker image: docker build -t matanglawin-test . to confirm the Dockerfile works with all new dependencies",
+    "Run a final comprehensive endpoint test to confirm nothing is broken"
+  ],
+  "acceptance_criteria": [
+    "All Python modules import without errors",
+    "Flask /health returns 200",
+    "Flask /api/inspections returns 200 with valid JSON",
+    "Flask /api/summary returns 200 with expected fields (total_inspections, total_confirmed_cracks, average_confidence, largest_crack, average_crack_size, images_today)",
+    "Flask /inspections returns 200 with valid HTML",
+    "Database init_db() creates the inspections.db file and table",
+    "report_generator.generate_pdf_report() creates a valid PDF file",
+    "crack_validator filters out small/noisy detections correctly",
+    "image_quality rejects bad frames and accepts good frames",
+    "Temporal verification requires exactly 5 consecutive frames",
+    "Docker build succeeds"
+  ],
+  "verification": [
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"import app, detector, capture_manager, inference_core, video_source, image_quality, crack_validator, inspection_db, report_generator; print('All imports OK')\"",
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"from app import app; c = app.test_client(); assert c.get('/health').status_code == 200; assert c.get('/api/inspections').status_code == 200; assert c.get('/api/summary').status_code == 200; assert c.get('/inspections').status_code == 200; print('All endpoints pass')\"",
+    "cd /projects/sandbox/Matanglawin-2.0 && docker build -t matanglawin-test . 2>&1 | tail -5"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

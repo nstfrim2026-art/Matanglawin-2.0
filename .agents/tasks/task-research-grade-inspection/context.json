@@ -1,0 +1,28 @@
+{
+  "project_type": "Python Flask web application - UAV crack detection dashboard with YOLO11-seg model",
+  "language": "Python (backend), JavaScript/HTML/CSS (frontend)",
+  "build_system": "pip with requirements.txt, Dockerfile for containerized builds",
+  "test_framework": "No formal test suite exists. Validation is via running the app and checking /health endpoint.",
+  "build_command": "pip install -r requirements.txt (plus fpdf2 openpyxl Pillow for new features)",
+  "test_command": "python -c \"from app import app; client = app.test_client(); r = client.get('/health'); assert r.status_code == 200, r.data\"",
+  "verification_instructions": "1. Activate venv. 2. Install dependencies. 3. Run python -c import checks for all modules. 4. Run Flask test client against /health endpoint. 5. Verify Docker builds successfully.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q && pip install -r requirements.txt -q && pip install fpdf2 openpyxl Pillow -q",
+  "environment_constraints": "OPEN_INTERNET - full network access. dnf install -y mesa-libGL already done. No GPU available - CPU-only inference. No actual camera hardware - testing is via code import/endpoint checks.",
+  "contribution_requirements": "Branch: feature/crack-detection-webapp. Preserve existing UI/UX, navigation, styling. Do not redesign. Integration-only enhancements.",
+  "key_patterns": "- detector.py: background thread with _run() loop, reads frames, runs inference, stores JPEG + status. - capture_manager.py: state machine (monitoring->threshold_reached->capturing->analyzing->analysis_complete->cooldown), saves to captures/ directory. - inference_core.py: annotate_frame() returns (annotated_frame, crack_present, crack_metadata_list). Uses _MODEL_LOCK for thread safety. - app.py: Flask routes, Detector instance created at module level. - dashboard.js: polls /status every 1s, /capture/status every 1.5s. - templates use Jinja2 with url_for() for static assets.",
+  "relevant_files": [
+    "app.py",
+    "detector.py",
+    "capture_manager.py",
+    "inference_core.py",
+    "video_source.py",
+    "templates/dashboard.html",
+    "static/js/dashboard.js",
+    "static/style.css",
+    "requirements.txt",
+    "Dockerfile",
+    ".gitignore"
+  ],
+  "directory_structure": "Root: app.py (Flask entry), detector.py (background worker), capture_manager.py (state machine), inference_core.py (YOLO inference), video_source.py (camera abstraction), letsview_source.py (Windows screen capture). templates/ has dashboard.html. static/ has style.css, js/dashboard.js, img/ (SVGs), sounds/ (alert.wav). captures/ is .gitignored output directory."
+}
