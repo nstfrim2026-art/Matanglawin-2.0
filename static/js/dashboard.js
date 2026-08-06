@@ -167,6 +167,7 @@
 
   let lastCaptureTimestamp = null;
   let alertFiredForCapture = false;
+  let thresholdSyncedFromBackend = false;
 
   var STATE_LABELS = {
     monitoring: "Monitoring",
@@ -303,6 +304,18 @@
       var res = await fetch("/capture/status", { cache: "no-store" });
       if (!res.ok) throw new Error("bad response");
       var data = await res.json();
+
+      // Sync threshold slider from backend on first successful poll
+      if (!thresholdSyncedFromBackend && data.threshold != null) {
+        thresholdSyncedFromBackend = true;
+        var backendPercent = Math.round(data.threshold * 100);
+        if (thresholdSlider) {
+          thresholdSlider.value = backendPercent;
+        }
+        if (thresholdLabel) {
+          thresholdLabel.textContent = backendPercent + "%";
+        }
+      }
 
       var state = data.state || "monitoring";
       updateAnalysisStatus(state);

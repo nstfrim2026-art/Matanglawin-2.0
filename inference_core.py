@@ -116,7 +116,7 @@ def annotate_frame(
     color: Tuple[int, int, int] = (0, 0, 255),  # B, G, R
     outline: int = 2,
     device: Optional[str] = None,
-) -> Tuple[np.ndarray, bool, list]:
+) -> Tuple[np.ndarray, bool, list, Optional[np.ndarray]]:
     """
     Run YOLO11-seg crack prediction on a single BGR frame (e.g. one frame
     pulled from a live camera/video source) and return an annotated copy.
@@ -127,11 +127,13 @@ def annotate_frame(
     frame of a continuous video stream.
 
     Returns:
-        (annotated_frame_bgr, crack_present, crack_metadata_list) where
+        (annotated_frame_bgr, crack_present, crack_metadata_list, masks) where
         crack_present is True if at least one crack instance mask was found
-        in this frame, and crack_metadata_list is a list of dicts with
+        in this frame, crack_metadata_list is a list of dicts with
         per-detection analysis (classification, confidence, area, bbox,
-        estimated length and width in pixels).
+        estimated length and width in pixels), and masks is the raw numpy
+        array of shape (N, H, W) with float values in [0,1] (or None if
+        no detections).
     """
     model = get_model(weights)
 
@@ -150,7 +152,7 @@ def annotate_frame(
     h, w = image.shape[:2]
 
     if result.masks is None or len(result.masks) == 0:
-        return image, False, []
+        return image, False, [], None
 
     masks = result.masks.data.cpu().numpy()  # (N, H, W) in [0,1]
     num_instances = len(masks)
@@ -211,4 +213,4 @@ def annotate_frame(
         contours, _ = cv2.findContours(union, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(blended, contours, -1, color, outline)
 
-    return blended, True, crack_metadata_list
+    return blended, True, crack_metadata_list, masks

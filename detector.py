@@ -154,7 +154,7 @@ class Detector:
                 continue
 
             try:
-                annotated, crack_present, crack_metadata = annotate_frame(
+                annotated, crack_present, crack_metadata, _masks = annotate_frame(
                     frame,
                     weights=self._weights,
                     conf=self._conf,

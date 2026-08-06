@@ -195,6 +195,45 @@ def generate_excel_export(
     return output_path
 
 
+def generate_excel_export_to_buffer(
+    inspections_list: List[Dict[str, Any]],
+    buffer,
+) -> None:
+    """
+    Generate an Excel workbook and write it to a file-like buffer (e.g. BytesIO).
+
+    Args:
+        inspections_list: list of inspection dicts
+        buffer: writable file-like object (e.g. io.BytesIO)
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Inspections"
+
+    headers = CSV_COLUMNS + ["image_path", "overlay_path", "report_path"]
+    header_font = Font(bold=True)
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+
+    for row_idx, record in enumerate(inspections_list, start=2):
+        for col_idx, header in enumerate(headers, start=1):
+            value = record.get(header, "")
+            if isinstance(value, (list, dict)):
+                value = str(value)
+            ws.cell(row=row_idx, column=col_idx, value=value)
+
+    for col_idx, header in enumerate(headers, start=1):
+        ws.column_dimensions[
+            ws.cell(row=1, column=col_idx).column_letter
+        ].width = max(len(header) + 2, 12)
+
+    wb.save(buffer)
+
+
 def generate_full_csv_export(
     inspections_list: List[Dict[str, Any]],
     output_path: str,

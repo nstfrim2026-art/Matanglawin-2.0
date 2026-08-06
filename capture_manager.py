@@ -344,7 +344,7 @@ class CaptureManager:
 
             # Step 2: Run full analysis on the captured frame
             try:
-                annotated, crack_present, analysis_metadata = annotate_frame(
+                annotated, crack_present, analysis_metadata, analysis_masks = annotate_frame(
                     raw_frame,
                     weights=self._weights,
                     conf=self._conf,
@@ -354,6 +354,7 @@ class CaptureManager:
                 annotated = raw_frame
                 crack_present = False
                 analysis_metadata = crack_metadata_list
+                analysis_masks = None
 
             # If no cracks found in re-analysis, discard
             if not crack_present or not analysis_metadata:
@@ -364,9 +365,9 @@ class CaptureManager:
                 return
 
             # Step 3: Advanced crack validation
-            # Try to get masks for validation (re-run lightweight check)
+            # Pass masks from the YOLO result to enable morphological checks
             validated_metadata = validate_cracks(
-                analysis_metadata, raw_frame, masks=None
+                analysis_metadata, raw_frame, masks=analysis_masks
             )
 
             if not validated_metadata:
@@ -523,15 +524,18 @@ class CaptureManager:
 
     def _scan_existing_captures(self) -> int:
         """Scan captures/images/ directory to find the highest existing capture number."""
+        import re
+
         if not os.path.isdir(self._images_dir):
             return 0
 
+        pattern = re.compile(r"^INSP-(\d+)\.jpg$")
         max_num = 0
         for fname in os.listdir(self._images_dir):
-            if fname.startswith("INSP-") and fname.endswith(".jpg"):
+            match = pattern.match(fname)
+            if match:
                 try:
-                    num_str = fname[5:10]  # INSP-XXXXX.jpg
-                    num = int(num_str)
+                    num = int(match.group(1))
                     if num > max_num:
                         max_num = num
                 except (ValueError, IndexError):

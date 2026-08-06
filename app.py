@@ -44,7 +44,7 @@ from flask import (
 from detector import Detector
 from inference_core import get_model
 from inspection_db import get_inspection_by_id, get_inspections, get_summary_stats, init_db
-from report_generator import generate_excel_export, generate_full_csv_export
+from report_generator import generate_excel_export, generate_excel_export_to_buffer, generate_full_csv_export
 from video_source import build_registry
 
 # ---------------------------------------------------------------------------
@@ -260,17 +260,30 @@ def api_summary():
 @app.route("/api/export/csv", methods=["GET"])
 def api_export_csv():
     """Export all inspection records as a CSV file download."""
-    import tempfile
+    import csv
+    import io
 
-    result = get_inspections(page=1, per_page=100000)
+    result = get_inspections(page=1, per_page=10000)
     items = result["items"]
 
-    tmp_dir = tempfile.mkdtemp()
-    output_path = os.path.join(tmp_dir, "inspections_export.csv")
-    generate_full_csv_export(items, output_path)
+    headers = [
+        "capture_id", "timestamp", "classification", "confidence",
+        "crack_area", "estimated_length", "estimated_width", "bbox",
+        "camera_source", "detection_threshold", "image_resolution",
+        "image_path", "overlay_path", "report_path",
+    ]
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=headers, extrasaction="ignore")
+    writer.writeheader()
+    for record in items:
+        writer.writerow(record)
+
+    mem = io.BytesIO(output.getvalue().encode("utf-8"))
+    mem.seek(0)
 
     return send_file(
-        output_path,
+        mem,
         mimetype="text/csv",
         as_attachment=True,
         download_name="inspections_export.csv",
@@ -280,17 +293,17 @@ def api_export_csv():
 @app.route("/api/export/excel", methods=["GET"])
 def api_export_excel():
     """Export all inspection records as an Excel file download."""
-    import tempfile
+    import io
 
-    result = get_inspections(page=1, per_page=100000)
+    result = get_inspections(page=1, per_page=10000)
     items = result["items"]
 
-    tmp_dir = tempfile.mkdtemp()
-    output_path = os.path.join(tmp_dir, "inspections_export.xlsx")
-    generate_excel_export(items, output_path)
+    mem = io.BytesIO()
+    generate_excel_export_to_buffer(items, mem)
+    mem.seek(0)
 
     return send_file(
-        output_path,
+        mem,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         as_attachment=True,
         download_name="inspections_export.xlsx",

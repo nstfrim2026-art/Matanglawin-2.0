@@ -1,7 +1,14 @@
 {
   "task_id": "task-research-grade-inspection",
   "task_description": "Improve the existing crack inspection web application into a research-grade UAV autonomous crack inspection system. Remove overlays from live feed, add temporal verification (5 consecutive frames), image quality validation, advanced crack validation to reduce false positives, SQLite database, structured captures directory, PDF/CSV/Excel reports, Inspection History page, Dashboard Summary stats, and Export functionality. Preserve existing UI/UX layout and styling.",
-  "status": "in_progress",
-  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
-  "blocked_reason": null
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "pass",
+    "summary": "All 9 modules import cleanly. All 10 endpoints return HTTP 200. Integration test suite (tests/test_integration.py) passes all 25 assertions. Review fixes applied: temp file leak resolved via BytesIO, crack validator masks now passed from annotate_frame, export capped at 10K records, threshold slider synced on page load, capture ID scan uses regex."
+  }
 }

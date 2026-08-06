@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-005",
+  "type": "fix",
+  "description": "Address review findings: fix temp file leaks in export endpoints, activate dead-code mask-based crack validation, cap export queries, sync threshold slider on page load, and fix fragile capture ID scanning.",
+  "status": "completed",
+  "steps": [
+    "Replace tempfile.mkdtemp() in /api/export/csv and /api/export/excel with in-memory BytesIO buffers to eliminate temp file leaks",
+    "Modify inference_core.annotate_frame() to return a 4-tuple including the raw masks numpy array (N,H,W)",
+    "Update all callers of annotate_frame (detector.py, capture_manager.py) to handle the 4-tuple",
+    "Pass the masks array from annotate_frame through to validate_cracks() in capture_manager._capture_worker()",
+    "Cap the export query limit from 100000 to 10000 records in both CSV and Excel endpoints",
+    "In dashboard.js, read the threshold from the first /capture/status poll response and sync the slider value",
+    "Replace the fragile fname[5:10] substring extraction in _scan_existing_captures() with a regex pattern"
+  ],
+  "acceptance_criteria": [
+    "Export endpoints use BytesIO (no temp files leaked to disk)",
+    "annotate_frame returns (frame, bool, list, masks_or_None) - 4 values",
+    "validate_cracks receives actual mask data when available",
+    "Export queries are capped at 10000 records",
+    "Threshold slider syncs from backend on first poll",
+    "Capture ID scan uses regex and handles IDs beyond 99999",
+    "All existing integration tests still pass"
+  ],
+  "verification": [
+    "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python tests/test_integration.py"
+  ],
+  "blocked_reason": null,
+  "findings": "All 5 review fixes implemented successfully. annotate_frame now returns a 4-tuple (annotated, crack_present, metadata, masks). The masks are passed to validate_cracks enabling circularity, solidity, morphological opening, and edge consistency checks. Export endpoints use BytesIO buffers. A new generate_excel_export_to_buffer() utility was added to report_generator.py. All integration tests pass without modification."
+}
