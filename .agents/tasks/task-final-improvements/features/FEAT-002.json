@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Frontend overhaul: remove unnecessary UI elements (stats cards, measurements, Drone Camera title, Inspection Summary section), add blinking danger alert banner on crack confirmation, fix alert sound with proper cooldown/state management, simplify analysis panel to show only confidence and result, and apply professional dark theme with modern polish.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "1. In templates/dashboard.html: (a) Remove the entire 'Dashboard Summary Section' (the section with id='dashboard-summary' containing Total Inspections, Confirmed Cracks, Avg Confidence, Largest Crack, Avg Crack Size, Inspections Today cards). (b) Remove 'Drone Camera' references from the page title or any headers. (c) Add a new blinking warning banner div (id='crackAlertBanner') at the top of the live-detection section, initially hidden, with text showing a warning emoji + 'CRACK DETECTED' + warning emoji.",
     "2. In static/js/dashboard.js: (a) Remove the entire pollSummary() function and its setInterval call. (b) Remove all references to summary DOM elements (summaryTotalInspections, summaryConfirmedCracks, etc). (c) Rewrite the alert sound logic: create a dedicated AudioManager class/object that handles playback with a 5-second cooldown, prevents duplicate plays, auto-recovers on playback failure (recreates Audio element if needed), and only fires AFTER analysis_complete state with a confirmed crack. (d) Add banner show/hide logic: show the crackAlertBanner with blinking animation when state is 'analysis_complete', hide it when state returns to 'monitoring' or 'cooldown'. (e) In renderCaptureAnalysis(), remove Length, Width, and Area display. Only show: captured image, classification badge, confidence bar with percentage, and timestamp.",
@@ -26,5 +26,5 @@
     "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from app import app; c=app.test_client(); r=c.get('/'); assert r.status_code==200; assert b'dashboard-summary' not in r.data; assert b'crackAlertBanner' in r.data or b'crack-alert-banner' in r.data; print('Dashboard HTML checks pass')\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All 6 steps implemented and verified. Dark theme applied to entire page (body, navbar, hero, features, how-it-works, contact, footer). Dashboard summary section completely removed from HTML, JS, and CSS. Blinking crack alert banner added with red/orange gradient that shows on analysis_complete state. Alert sound logic rewritten with AudioManager class (5s cooldown, auto-recovery, fires only on confirmed crack). Analysis panel simplified - no Length/Width/Area. Inspections page updated with Notes column, Delete button, and dark theme. DELETE and PATCH API endpoints added with proper 404/400 error handling. Notes column migration added to init_db(). All integration tests pass including new endpoint tests."
 }
