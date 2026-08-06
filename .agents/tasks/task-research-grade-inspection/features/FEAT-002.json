@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Core backend overhaul: (1) Remove overlays from live feed so detector sends raw frames as MJPEG. (2) Add temporal verification requiring 5 consecutive frames above threshold before triggering capture. (3) Add image quality validation (blur, brightness, exposure) that discards bad captures. (4) Add advanced crack validation to reduce false positives (min area, min length, aspect ratio, morphological filtering, edge consistency, isolated blob rejection). (5) Create SQLite database for inspection records. (6) Restructure captures/ into subdirectories (images/, overlays/, metadata/, reports/, exports/). (7) Generate overlay image, JSON metadata, CSV record, and PDF inspection report for each confirmed capture. (8) Add export endpoints (CSV, Excel, PDF) and inspection history query endpoint. (9) Add dashboard summary stats endpoint.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create a new module image_quality.py with functions: check_blur(frame) using Laplacian variance, check_brightness(frame) checking mean luminance is in acceptable range, check_exposure(frame) checking histogram distribution. Return a dict with pass/fail and details.",
     "Create a new module crack_validator.py with function validate_cracks(crack_metadata_list, frame, masks) that filters out false positives using: minimum crack area (e.g. 100px), minimum crack length (e.g. 20px), aspect ratio validation (cracks should be elongated, ratio > 2), morphological filtering (erode+dilate to remove noise), edge consistency (check contour smoothness via approxPolyDP), isolated blob rejection (reject if contour area is very small relative to bounding rect), prefer long continuous structures. Returns filtered crack_metadata_list.",
@@ -34,5 +34,5 @@
     "source /projects/sandbox/Matanglawin-2.0/venv/bin/activate && cd /projects/sandbox/Matanglawin-2.0 && python -c \"from inspection_db import init_db, get_summary_stats; init_db(); stats = get_summary_stats(); print('DB OK:', stats)\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All modules import cleanly. All endpoints respond correctly (verified via Flask test client). Docker build succeeds. Temporal verification set to 5 frames. Image quality checks validated with test frames. Crack validator correctly rejects small noise, round blobs, and non-elongated shapes. PDF/CSV/Excel report generation confirmed. SQLite DB init and query works. The detector now streams raw frames for the MJPEG feed while still running inference silently for the capture manager. Existing capture endpoints (/capture/status, /capture/threshold, /capture/image, /capture/cooldown, /capture/reset) all still work."
 }
