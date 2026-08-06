@@ -218,23 +218,23 @@ def test_report_generator():
 def test_crack_validator():
     """Verify crack validation filters."""
     print("=== CRACK VALIDATOR TESTS ===")
-    from crack_validator import validate_cracks
+    from crack_validator import validate_cracks, DJI_UI_ZONE_FRACTION
 
     frame = np.random.randint(100, 200, (480, 640, 3), dtype=np.uint8)
 
-    # Small blobs rejected
+    # Small blobs rejected (threshold is now 150)
     small = [
         {
             "confidence": 0.95,
             "area_px": 50,
             "estimated_length_px": 10.0,
             "estimated_width_px": 5.0,
-            "bbox": [10, 20, 30, 40],
+            "bbox": [10, 200, 30, 240],
             "classification": "crack",
         }
     ]
     assert len(validate_cracks(small, frame)) == 0
-    print("  [PASS] Small blobs (area < 100px) rejected")
+    print("  [PASS] Small blobs (area < 150px) rejected")
 
     # Elongated cracks pass
     elongated = [
@@ -243,40 +243,85 @@ def test_crack_validator():
             "area_px": 500,
             "estimated_length_px": 100.0,
             "estimated_width_px": 10.0,
-            "bbox": [10, 20, 200, 40],
+            "bbox": [10, 100, 200, 140],
             "classification": "crack",
         }
     ]
     assert len(validate_cracks(elongated, frame)) == 1
     print("  [PASS] Elongated cracks pass validation")
 
-    # Round noise rejected (low aspect ratio)
+    # Round noise rejected (low aspect ratio < 2.5)
     noise = [
         {
             "confidence": 0.90,
             "area_px": 200,
             "estimated_length_px": 30.0,
             "estimated_width_px": 25.0,
-            "bbox": [10, 20, 40, 45],
+            "bbox": [10, 200, 40, 245],
             "classification": "crack",
         }
     ]
     assert len(validate_cracks(noise, frame)) == 0
     print("  [PASS] Round noise (low aspect ratio) rejected")
 
-    # Short cracks rejected
+    # Short cracks rejected (threshold is now 30)
     short = [
         {
             "confidence": 0.90,
             "area_px": 200,
-            "estimated_length_px": 15.0,
+            "estimated_length_px": 25.0,
             "estimated_width_px": 3.0,
-            "bbox": [10, 20, 25, 23],
+            "bbox": [10, 200, 35, 223],
             "classification": "crack",
         }
     ]
     assert len(validate_cracks(short, frame)) == 0
-    print("  [PASS] Short cracks (length < 20px) rejected")
+    print("  [PASS] Short cracks (length < 30px) rejected")
+
+    # DJI UI zone rejection: detection in top 15% of frame
+    h = 480
+    top_zone_max = int(h * DJI_UI_ZONE_FRACTION)  # 72 pixels
+    top_detection = [
+        {
+            "confidence": 0.95,
+            "area_px": 500,
+            "estimated_length_px": 100.0,
+            "estimated_width_px": 10.0,
+            "bbox": [10, 5, 200, 60],  # entirely within top 15%
+            "classification": "crack",
+        }
+    ]
+    assert len(validate_cracks(top_detection, frame)) == 0
+    print("  [PASS] DJI UI zone: detection in top 15% rejected")
+
+    # DJI UI zone rejection: detection in bottom 15% of frame
+    bottom_zone_min = int(h * (1.0 - DJI_UI_ZONE_FRACTION))  # 408 pixels
+    bottom_detection = [
+        {
+            "confidence": 0.95,
+            "area_px": 500,
+            "estimated_length_px": 100.0,
+            "estimated_width_px": 10.0,
+            "bbox": [10, 420, 200, 475],  # entirely within bottom 15%
+            "classification": "crack",
+        }
+    ]
+    assert len(validate_cracks(bottom_detection, frame)) == 0
+    print("  [PASS] DJI UI zone: detection in bottom 15% rejected")
+
+    # Detection in center of frame should pass
+    center_detection = [
+        {
+            "confidence": 0.95,
+            "area_px": 500,
+            "estimated_length_px": 100.0,
+            "estimated_width_px": 10.0,
+            "bbox": [10, 150, 200, 300],  # center of frame
+            "classification": "crack",
+        }
+    ]
+    assert len(validate_cracks(center_detection, frame)) == 1
+    print("  [PASS] DJI UI zone: detection in center passes")
     print()
 
 
@@ -315,13 +360,64 @@ def test_image_quality():
     print()
 
 
+def test_preprocess_frame():
+    """Verify preprocessing enhances dark frames."""
+    print("=== PREPROCESS FRAME TESTS ===")
+    from inference_core import preprocess_frame
+
+    # Dark frame should be brightened by CLAHE + gamma
+    dark_frame = np.full((480, 640, 3), 30, dtype=np.uint8)
+    result = preprocess_frame(dark_frame)
+    assert result.shape == dark_frame.shape
+    assert result.dtype == np.uint8
+    # CLAHE + gamma on a dark frame should produce a brighter result
+    assert result.mean() > dark_frame.mean(), (
+        f"Expected brighter output: input mean={dark_frame.mean():.1f}, "
+        f"output mean={result.mean():.1f}"
+    )
+    print("  [PASS] Dark frame is brightened by preprocessing")
+
+    # Normal frame should maintain similar dimensions and type
+    normal_frame = np.random.randint(80, 180, (480, 640, 3), dtype=np.uint8)
+    result_normal = preprocess_frame(normal_frame)
+    assert result_normal.shape == normal_frame.shape
+    assert result_normal.dtype == np.uint8
+    print("  [PASS] Normal frame maintains shape and dtype")
+
+    # Empty/None handling
+    empty = np.array([], dtype=np.uint8)
+    result_empty = preprocess_frame(empty)
+    assert result_empty.size == 0
+    print("  [PASS] Empty frame handled gracefully")
+    print()
+
+
+def test_confidence_default():
+    """Verify default confidence threshold is 0.40."""
+    print("=== CONFIDENCE DEFAULT TESTS ===")
+    import inspect
+    from inference_core import annotate_frame
+
+    sig = inspect.signature(annotate_frame)
+    conf_default = sig.parameters["conf"].default
+    assert conf_default == 0.40, f"Expected 0.40, got {conf_default}"
+    print(f"  [PASS] inference_core.annotate_frame conf default = {conf_default}")
+
+    import app
+    assert app.CONF == 0.40, f"Expected app.CONF=0.40, got {app.CONF}"
+    print(f"  [PASS] app.CONF = {app.CONF}")
+    print()
+
+
 def test_temporal_verification():
-    """Verify temporal verification requires 5 consecutive frames."""
+    """Verify temporal verification requires 5 consecutive frames spanning 1.5s."""
     print("=== TEMPORAL VERIFICATION TESTS ===")
-    from capture_manager import CaptureManager, VERIFICATION_FRAME_COUNT
+    from capture_manager import CaptureManager, VERIFICATION_FRAME_COUNT, VERIFICATION_MIN_SPAN_SECONDS
 
     assert VERIFICATION_FRAME_COUNT == 5
     print(f"  [PASS] VERIFICATION_FRAME_COUNT = {VERIFICATION_FRAME_COUNT}")
+    assert VERIFICATION_MIN_SPAN_SECONDS == 1.5
+    print(f"  [PASS] VERIFICATION_MIN_SPAN_SECONDS = {VERIFICATION_MIN_SPAN_SECONDS}")
 
     cm = CaptureManager(threshold=0.85, cooldown=1.0)
     frame = np.random.randint(80, 180, (480, 640, 3), dtype=np.uint8)
@@ -331,7 +427,7 @@ def test_temporal_verification():
             "area_px": 500,
             "estimated_length_px": 100.0,
             "estimated_width_px": 10.0,
-            "bbox": [10, 20, 200, 40],
+            "bbox": [10, 100, 200, 140],
             "classification": "crack",
         }
     ]
@@ -344,12 +440,13 @@ def test_temporal_verification():
     assert status["consecutive_detections"] == 4
     print("  [PASS] 4 frames: still monitoring, 4 consecutive")
 
-    # 5th frame triggers
+    # 5th frame should not trigger immediately (time span < 1.5s)
     cm.process_frame(frame, meta)
     time.sleep(0.1)
-    state = cm.get_state()
-    assert state != "monitoring" or cm._capture_in_progress
-    print(f"  [PASS] 5th frame triggers capture (state={state})")
+    status = cm.get_capture_status()
+    # Should still be monitoring since frames arrived too fast
+    assert status["state"] == "monitoring"
+    print("  [PASS] 5 fast frames: still monitoring (time-spread not met)")
 
     # Reset and verify counter resets on no detection
     cm.reset()
@@ -375,6 +472,8 @@ def main():
     test_report_generator()
     test_crack_validator()
     test_image_quality()
+    test_preprocess_frame()
+    test_confidence_default()
     test_temporal_verification()
 
     print("=" * 60)

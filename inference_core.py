@@ -14,6 +14,57 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+
+# ---------------------------------------------------------------------------
+# Frame preprocessing pipeline
+# ---------------------------------------------------------------------------
+
+
+def preprocess_frame(frame_bgr: np.ndarray) -> np.ndarray:
+    """
+    Preprocess a frame before YOLO inference to improve crack visibility.
+
+    Applies (in order):
+      1. CLAHE on the L channel of LAB color space
+      2. Gamma correction (gamma=1.2)
+      3. Light unsharp mask sharpening
+      4. Bilateral filter for noise reduction while preserving edges
+
+    Args:
+        frame_bgr: Input BGR frame (numpy array).
+
+    Returns:
+        Preprocessed BGR frame (same shape).
+    """
+    if frame_bgr is None or frame_bgr.size == 0:
+        return frame_bgr
+
+    # 1. CLAHE on L channel (LAB color space)
+    lab = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l_channel)
+    lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
+    result = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+
+    # 2. Gamma correction (gamma=1.2)
+    gamma = 1.2
+    inv_gamma = 1.0 / gamma
+    table = np.array(
+        [((i / 255.0) ** inv_gamma) * 255 for i in range(256)],
+        dtype=np.uint8,
+    )
+    result = cv2.LUT(result, table)
+
+    # 3. Light unsharp mask sharpening
+    gaussian = cv2.GaussianBlur(result, (0, 0), sigmaX=2.0)
+    result = cv2.addWeighted(result, 1.3, gaussian, -0.3, 0)
+
+    # 4. Bilateral filter for noise reduction while preserving edges
+    result = cv2.bilateralFilter(result, d=5, sigmaColor=50, sigmaSpace=50)
+
+    return result
+
 # Cache loaded models by weights path so we don't reload the .pt file on
 # every request (loading is the slow part).
 _MODEL_CACHE = {}
@@ -110,7 +161,7 @@ def _classify_crack(area_px: int, h: int, w: int) -> str:
 def annotate_frame(
     frame_bgr: np.ndarray,
     weights: str = "best.pt",
-    conf: float = 0.25,
+    conf: float = 0.40,
     imgsz: int = 640,
     alpha: float = 0.45,
     color: Tuple[int, int, int] = (0, 0, 255),  # B, G, R
@@ -137,9 +188,12 @@ def annotate_frame(
     """
     model = get_model(weights)
 
+    # Preprocess frame to improve crack visibility before inference
+    preprocessed = preprocess_frame(frame_bgr)
+
     with _MODEL_LOCK:
         results = model.predict(
-            source=frame_bgr,
+            source=preprocessed,
             conf=conf,
             imgsz=imgsz,
             retina_masks=True,

@@ -66,6 +66,12 @@ ANALYSIS_COMPLETE_HOLD_SECONDS = 2.0
 # Temporal verification: consecutive frames required above threshold
 VERIFICATION_FRAME_COUNT = 5
 
+# Minimum time span (seconds) that verification frames must cover
+VERIFICATION_MIN_SPAN_SECONDS = 1.5
+
+# Maximum time (seconds) for the capture worker before force-reset
+CAPTURE_WORKER_TIMEOUT_SECONDS = 30.0
+
 
 class CaptureManager:
     """Manages automatic crack image capture based on confidence threshold."""
@@ -96,7 +102,7 @@ class CaptureManager:
 
         # Temporal verification state
         self._consecutive_detections: int = 0
-        self._verification_buffer: list = []  # list of (frame, metadata) tuples
+        self._verification_buffer: list = []  # list of (frame, metadata, timestamp) tuples
 
         # Latest capture results (kept in memory for serving to frontend)
         self._latest_capture_jpeg: Optional[bytes] = None
@@ -220,7 +226,8 @@ class CaptureManager:
     ) -> None:
         """
         Temporal verification: require VERIFICATION_FRAME_COUNT consecutive
-        frames with max confidence >= threshold before triggering capture.
+        frames with max confidence >= threshold AND spanning at least
+        VERIFICATION_MIN_SPAN_SECONDS before triggering capture.
         """
         with self._lock:
             threshold = self._threshold
@@ -237,10 +244,11 @@ class CaptureManager:
         max_conf = max(m["confidence"] for m in crack_metadata_list)
 
         if max_conf >= threshold:
+            now = time.monotonic()
             with self._lock:
                 self._consecutive_detections += 1
                 self._verification_buffer.append(
-                    (raw_frame.copy(), list(crack_metadata_list))
+                    (raw_frame.copy(), list(crack_metadata_list), now)
                 )
                 # Keep buffer size bounded
                 if len(self._verification_buffer) > VERIFICATION_FRAME_COUNT:
@@ -248,6 +256,7 @@ class CaptureManager:
                         -VERIFICATION_FRAME_COUNT:
                     ]
                 count = self._consecutive_detections
+                buffer = list(self._verification_buffer)
         else:
             # Below threshold - reset
             with self._lock:
@@ -255,8 +264,19 @@ class CaptureManager:
                 self._verification_buffer = []
             return
 
-        # Check if temporal verification has passed
-        if count >= VERIFICATION_FRAME_COUNT:
+        # Check if temporal verification has passed:
+        # Need at least VERIFICATION_FRAME_COUNT frames AND they must span
+        # at least VERIFICATION_MIN_SPAN_SECONDS
+        if count >= VERIFICATION_FRAME_COUNT and len(buffer) >= VERIFICATION_FRAME_COUNT:
+            # Check time span between first and last frame in buffer
+            first_time = buffer[0][2]
+            last_time = buffer[-1][2]
+            time_span = last_time - first_time
+
+            if time_span < VERIFICATION_MIN_SPAN_SECONDS:
+                # Not enough time has elapsed - keep waiting
+                return
+
             with self._lock:
                 self._capture_in_progress = True
                 self._state = "threshold_reached"
@@ -267,7 +287,7 @@ class CaptureManager:
                 best_frame = None
                 best_metadata = None
                 best_conf = 0.0
-                for buf_frame, buf_meta in self._verification_buffer:
+                for buf_frame, buf_meta, _ts in self._verification_buffer:
                     frame_max = max(m["confidence"] for m in buf_meta)
                     if frame_max > best_conf:
                         best_conf = frame_max
@@ -289,6 +309,13 @@ class CaptureManager:
             )
             capture_thread.start()
 
+            # Start a timeout watchdog thread
+            timeout_thread = threading.Thread(
+                target=self._capture_timeout_watchdog,
+                daemon=True,
+            )
+            timeout_thread.start()
+
     def _handle_cooldown(self) -> None:
         """Check if cooldown period has elapsed."""
         with self._lock:
@@ -296,6 +323,27 @@ class CaptureManager:
             if elapsed >= self._cooldown:
                 self._state = "monitoring"
                 self._state_change_time = time.monotonic()
+
+    def _capture_timeout_watchdog(self) -> None:
+        """
+        Monitor the capture worker and force-reset to monitoring if it takes
+        longer than CAPTURE_WORKER_TIMEOUT_SECONDS.
+        """
+        start = time.monotonic()
+        while True:
+            time.sleep(1.0)
+            with self._lock:
+                if not self._capture_in_progress:
+                    # Capture finished normally
+                    return
+            elapsed = time.monotonic() - start
+            if elapsed >= CAPTURE_WORKER_TIMEOUT_SECONDS:
+                # Force reset
+                with self._lock:
+                    self._state = "monitoring"
+                    self._state_change_time = time.monotonic()
+                    self._capture_in_progress = False
+                return
 
     def _capture_worker(
         self, raw_frame: np.ndarray, crack_metadata_list: list

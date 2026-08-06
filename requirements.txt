@@ -4,9 +4,8 @@ opencv-python-headless>=4.9
 numpy>=1.26
 werkzeug>=3.0
 
-# LetsView screen capture source dependencies
-mss>=9.0
-PyGetWindow>=0.0.9
+# Windows Graphics Capture API for LetsView screen capture (Windows-only, optional)
+# winsdk>=1.0
 
 # Inspection report and export dependencies
 fpdf2>=2.7

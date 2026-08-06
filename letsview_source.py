@@ -2,13 +2,13 @@
 letsview_source.py - Screen capture source for LetsView mirroring window.
 
 This module provides the LetsViewSource class, which captures frames directly
-from the LetsView application window on Windows. It implements the same
-interface as VideoSource (open, read, release, is_open) so the detector
-pipeline can use it interchangeably.
+from the LetsView application window on Windows using the Windows Graphics
+Capture API (via winsdk). It implements the same interface as VideoSource
+(open, read, release, is_open) so the detector pipeline can use it
+interchangeably.
 
-On non-Windows platforms (e.g., Linux), open() returns False gracefully and
-the detector shows a NO SIGNAL placeholder - this is expected since LetsView
-window capture requires Windows-specific APIs.
+On non-Windows platforms or if winsdk is not available, open() returns False
+gracefully and the detector shows a NO SIGNAL placeholder.
 
 Pipeline:
     DJI Drone -> DJI Controller -> Android Phone (DJI Fly) -> LetsView
@@ -24,27 +24,37 @@ from typing import Optional
 import cv2
 import numpy as np
 
-# Platform-specific imports - these may not be available on Linux.
+# ---------------------------------------------------------------------------
+# Platform-specific imports for Windows Graphics Capture API
+# ---------------------------------------------------------------------------
 _PLATFORM_OK = False
-_gw = None
-_mss_module = None
+_winsdk_available = False
 
-try:
-    import mss as _mss_module_import
+if platform.system() == "Windows":
+    try:
+        import ctypes
+        import ctypes.wintypes
 
-    _mss_module = _mss_module_import
-except ImportError:
-    _mss_module = None
+        # Attempt to import winsdk for Windows Graphics Capture
+        from winsdk.windows.graphics.capture import (
+            Direct3D11CaptureFramePool,
+            GraphicsCaptureItem,
+            GraphicsCaptureSession,
+        )
+        from winsdk.windows.graphics.directx import DirectXPixelFormat
+        from winsdk.windows.graphics.directx.direct3d11 import (
+            IDirect3DDevice,
+            IDirect3DSurface,
+        )
+        import winsdk.windows.graphics.capture as wgc
 
-try:
-    import pygetwindow as _gw_import
-
-    # pygetwindow imports but its Windows functions only work on Windows
-    if platform.system() == "Windows":
-        _gw = _gw_import
+        _winsdk_available = True
         _PLATFORM_OK = True
-except (ImportError, NotImplementedError):
-    _gw = None
+    except (ImportError, OSError, AttributeError):
+        _winsdk_available = False
+        _PLATFORM_OK = False
+else:
+    _winsdk_available = False
 
 # Window title patterns to match (case-insensitive partial match)
 _LETSVIEW_TITLES = [
@@ -72,31 +82,57 @@ def _make_status_frame(
     return frame
 
 
-def _find_letsview_window():
+def _find_letsview_hwnd():
     """
-    Search for a LetsView window using case-insensitive partial title matching.
-
-    Returns the window object if found, None otherwise.
+    Search for a LetsView window by enumerating top-level windows using
+    ctypes on Windows. Returns the HWND (int) if found, None otherwise.
     """
-    if _gw is None:
+    if platform.system() != "Windows":
         return None
 
     try:
-        all_windows = _gw.getAllWindows()
+        import ctypes
+        import ctypes.wintypes
+
+        user32 = ctypes.windll.user32
+        EnumWindows = user32.EnumWindows
+        GetWindowTextW = user32.GetWindowTextW
+        GetWindowTextLengthW = user32.GetWindowTextLengthW
+        IsWindowVisible = user32.IsWindowVisible
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.HWND,
+            ctypes.wintypes.LPARAM,
+        )
+
+        found_hwnd = [None]
+
+        def enum_callback(hwnd, lparam):
+            if not IsWindowVisible(hwnd):
+                return True
+            length = GetWindowTextLengthW(hwnd)
+            if length == 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 1)
+            GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.lower()
+            for pattern in _LETSVIEW_TITLES:
+                if pattern in title:
+                    found_hwnd[0] = hwnd
+                    return False  # Stop enumeration
+            return True
+
+        EnumWindows(WNDENUMPROC(enum_callback), 0)
+        return found_hwnd[0]
     except Exception:
         return None
-
-    for win in all_windows:
-        title_lower = (win.title or "").lower()
-        for pattern in _LETSVIEW_TITLES:
-            if pattern in title_lower:
-                return win
-    return None
 
 
 class LetsViewSource:
     """
-    Screen capture source that grabs frames from the LetsView window.
+    Screen capture source that grabs frames from the LetsView window
+    using the Windows Graphics Capture API (winsdk).
 
     Implements the same interface as VideoSource:
         open() -> bool
@@ -104,15 +140,17 @@ class LetsViewSource:
         release() -> None
         is_open (property)
 
-    On non-Windows platforms, open() returns False immediately (no LetsView
-    window capture is possible without Windows APIs).
+    On non-Windows platforms or when winsdk is unavailable, open() returns
+    False immediately (no LetsView window capture is possible).
     """
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._window = None
-        self._sct = None  # mss instance
         self._opened = False
+        self._session = None
+        self._frame_pool = None
+        self._hwnd = None
+        self._latest_frame: Optional[np.ndarray] = None
 
     @property
     def is_open(self) -> bool:
@@ -121,110 +159,116 @@ class LetsViewSource:
 
     def open(self) -> bool:
         """
-        Search for the LetsView window and prepare for capture.
+        Search for the LetsView window and prepare for capture using
+        the Windows Graphics Capture API.
 
         Returns True if the window was found and capture can begin.
-        Returns False if the platform is unsupported or no window was found.
+        Returns False if the platform is unsupported, winsdk is unavailable,
+        or no LetsView window was found.
         """
         with self._lock:
             self._release_locked()
 
-            # Platform check: only works on Windows
-            if not _PLATFORM_OK:
+            # Platform and dependency check
+            if not _PLATFORM_OK or not _winsdk_available:
                 return False
 
-            # mss is required for capture
-            if _mss_module is None:
+            # Find the LetsView window by HWND
+            hwnd = _find_letsview_hwnd()
+            if hwnd is None:
                 return False
 
-            window = _find_letsview_window()
-            if window is None:
-                return False
-
-            self._window = window
             try:
-                self._sct = _mss_module.mss()
-            except Exception:
-                self._window = None
-                return False
+                # Create GraphicsCaptureItem from HWND
+                import winsdk.windows.graphics.capture as wgc
 
-            self._opened = True
-            return True
+                interop = wgc.GraphicsCaptureItem
+                item = interop.create_from_window_handle(hwnd)
+                if item is None:
+                    return False
+
+                # Create D3D11 device and frame pool
+                from winsdk.windows.graphics.directx import DirectXPixelFormat
+                from winsdk.windows.graphics.directx.direct3d11 import (
+                    IDirect3DDevice,
+                )
+
+                device = IDirect3DDevice.create()
+                size = item.size
+                pool = Direct3D11CaptureFramePool.create_free_threaded(
+                    device,
+                    DirectXPixelFormat.B8_G8_R8_A8_UINT_NORMALIZED,
+                    2,  # buffer count
+                    size,
+                )
+
+                session = pool.create_capture_session(item)
+                session.start_capture()
+
+                self._hwnd = hwnd
+                self._session = session
+                self._frame_pool = pool
+                self._opened = True
+                return True
+            except Exception:
+                self._release_locked()
+                return False
 
     def read(self):
         """
-        Capture the current frame from the LetsView window.
+        Capture the current frame from the LetsView window using the
+        Windows Graphics Capture API.
 
-        NOTE: This uses mss region capture, which grabs the screen area at the
-        window's bounding box coordinates. Any window overlapping the LetsView
-        window will bleed into the captured frame. Ensure LetsView remains in
-        the foreground (not occluded by other windows) during capture sessions.
+        This captures directly from the window HWND, so it continues to
+        work even if the window is covered by other applications or is
+        partially offscreen.
 
         Returns:
-            (True, frame) - successful capture or status frame
-            (False, None) - window disappeared, triggers reconnection
+            (True, frame) - successful capture
+            (False, None) - capture session lost, triggers reconnection
         """
-        # --- Phase 1: Validate state and copy geometry under the lock ---
         with self._lock:
             if not self._opened:
                 return False, None
 
-            # Re-check that the window still exists
-            window = self._window
-            if window is None:
+            if self._frame_pool is None:
                 self._opened = False
                 return False, None
 
-            # Check if window is minimized
             try:
-                if window.isMinimized:
-                    return True, _make_status_frame("LetsView window minimized.")
+                frame = self._frame_pool.try_get_next_frame()
+                if frame is None:
+                    # No new frame available yet; return last known frame
+                    if self._latest_frame is not None:
+                        return True, self._latest_frame.copy()
+                    return True, _make_status_frame("Waiting for LetsView frame...")
+
+                # Convert the captured surface to numpy array
+                surface = frame.surface
+                # Access the underlying bitmap data
+                import winsdk.windows.graphics.imaging as imaging
+
+                soft_bitmap = imaging.SoftwareBitmap.create_copy_from_surface_async(
+                    surface,
+                    imaging.BitmapPixelFormat.BGRA8,
+                ).get()
+
+                buf = soft_bitmap.lock_buffer(imaging.BitmapBufferAccessMode.READ)
+                ref = buf.create_reference()
+                data = np.frombuffer(ref, dtype=np.uint8)
+                h = soft_bitmap.pixel_height
+                w = soft_bitmap.pixel_width
+                bgra = data.reshape((h, w, 4))
+                bgr = bgra[:, :, :3].copy()
+
+                self._latest_frame = bgr
+                frame.close()
+                return True, bgr
+
             except Exception:
-                # Window may have been closed
+                # Capture failed - session may be invalid
                 self._release_locked()
                 return False, None
-
-            # Get current window geometry (handles resize automatically)
-            try:
-                left = window.left
-                top = window.top
-                width = window.width
-                height = window.height
-            except Exception:
-                # Window no longer accessible
-                self._release_locked()
-                return False, None
-
-            # Validate geometry
-            if width <= 0 or height <= 0:
-                return True, _make_status_frame("LetsView window minimized.")
-
-            # Copy what we need for capture outside the lock
-            monitor = {
-                "left": left,
-                "top": top,
-                "width": width,
-                "height": height,
-            }
-            sct = self._sct
-
-        # --- Phase 2: Perform capture and conversion outside the lock ---
-        # This avoids blocking is_open and release() during the ~5-15ms
-        # screenshot grab and numpy/color conversion.
-        try:
-            screenshot = sct.grab(monitor)
-        except Exception:
-            # Capture failed - window may have closed
-            with self._lock:
-                self._release_locked()
-            return False, None
-
-        # Convert BGRA -> BGR numpy array
-        frame = np.array(screenshot, dtype=np.uint8)
-        # mss returns BGRA format
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-
-        return True, frame
 
     def release(self) -> None:
         """Release capture resources."""
@@ -233,11 +277,18 @@ class LetsViewSource:
 
     def _release_locked(self) -> None:
         """Internal release without acquiring lock (caller must hold lock)."""
-        if self._sct is not None:
+        if self._session is not None:
             try:
-                self._sct.close()
+                self._session.close()
             except Exception:
                 pass
-            self._sct = None
-        self._window = None
+            self._session = None
+        if self._frame_pool is not None:
+            try:
+                self._frame_pool.close()
+            except Exception:
+                pass
+            self._frame_pool = None
+        self._hwnd = None
+        self._latest_frame = None
         self._opened = False

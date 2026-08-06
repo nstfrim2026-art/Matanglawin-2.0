@@ -21,13 +21,16 @@ import numpy as np
 
 
 # Validation thresholds
-MIN_CRACK_AREA_PX = 100       # Minimum mask area in pixels
-MIN_CRACK_LENGTH_PX = 20.0    # Minimum estimated length in pixels
-MIN_ASPECT_RATIO = 2.0        # Minimum length/width ratio (cracks are elongated)
+MIN_CRACK_AREA_PX = 150       # Minimum mask area in pixels
+MIN_CRACK_LENGTH_PX = 30.0    # Minimum estimated length in pixels
+MIN_ASPECT_RATIO = 2.5        # Minimum length/width ratio (cracks are elongated)
 MIN_SOLIDITY = 0.15           # Minimum contour area / convex hull area
 MAX_CIRCULARITY = 0.7         # Maximum circularity (reject round blobs)
 MIN_EDGE_CONSISTENCY = 0.3    # Minimum ratio of approxPolyDP points to contour points
 MORPH_KERNEL_SIZE = 3         # Kernel size for morphological operations
+
+# DJI UI zone rejection: top/bottom percentage of frame considered UI overlay
+DJI_UI_ZONE_FRACTION = 0.15   # Reject detections entirely within top/bottom 15%
 
 
 def validate_cracks(
@@ -53,7 +56,23 @@ def validate_cracks(
     h, w = frame.shape[:2]
     validated = []
 
+    # DJI UI zone boundaries (top and bottom 15% of frame)
+    ui_top_boundary = h * DJI_UI_ZONE_FRACTION
+    ui_bottom_boundary = h * (1.0 - DJI_UI_ZONE_FRACTION)
+
     for i, meta in enumerate(crack_metadata_list):
+        # 0. DJI UI zone rejection: reject detections whose bbox is entirely
+        # within the top or bottom 15% of the frame (typical DJI Fly overlay)
+        bbox = meta.get("bbox")
+        if bbox and len(bbox) == 4:
+            _, y1, _, y2 = bbox
+            # If the entire bbox is in the top UI zone
+            if y2 <= ui_top_boundary:
+                continue
+            # If the entire bbox is in the bottom UI zone
+            if y1 >= ui_bottom_boundary:
+                continue
+
         # 1. Minimum area check
         if meta.get("area_px", 0) < MIN_CRACK_AREA_PX:
             continue

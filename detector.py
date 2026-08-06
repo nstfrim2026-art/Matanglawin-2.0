@@ -55,6 +55,7 @@ class Detector:
         self._camera_connected = False
         self._crack_present = False
         self._crack_metadata: list = []
+        self._last_frame_time: float = 0.0  # heartbeat: monotonic time of last frame
 
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -85,6 +86,7 @@ class Detector:
                 "crack_present": self._crack_present,
                 "source": self._source_key,
                 "cracks": self._crack_metadata,
+                "last_frame_time": self._last_frame_time,
             }
 
     def set_source(self, source_key: str) -> bool:
@@ -106,83 +108,102 @@ class Detector:
     # -- internal worker loop -------------------------------------------
     def _run(self) -> None:
         reconnect_cooldown = 0.0  # monotonic time when next reconnect is allowed
+        _failure_count = 0        # Track consecutive source failures
+        _failure_window_start = time.monotonic()
 
         while not self._stop_event.is_set():
-            self._maybe_switch_source()
+            try:
+                self._maybe_switch_source()
 
-            if self._video_source is None or not self._video_source.is_open:
-                self._set_disconnected_frame()
+                if self._video_source is None or not self._video_source.is_open:
+                    self._set_disconnected_frame()
 
-                # Automatic reconnection: if no pending source change and we
-                # have a known source key, re-attempt opening after a 1-second
-                # cooldown.  This keeps the reconnection logic source-agnostic
-                # (works for LetsView, IP cameras, or any transient source).
+                    # Automatic reconnection: if no pending source change and we
+                    # have a known source key, re-attempt opening after a cooldown.
+                    with self._lock:
+                        has_pending = self._pending_source_key is not None
+                        current_key = self._source_key
+
+                    if not has_pending and current_key in self._registry:
+                        now = time.monotonic()
+                        if now >= reconnect_cooldown:
+                            spec = self._registry[current_key].spec
+                            if spec == "letsview://":
+                                vs = LetsViewSource()
+                            else:
+                                vs = VideoSource(spec)
+
+                            if vs.open():
+                                self._video_source = vs
+                                _failure_count = 0
+                                continue
+                            else:
+                                vs.release()
+
+                            # Track failures and increase cooldown with backoff
+                            _failure_count += 1
+                            now2 = time.monotonic()
+                            # Reset failure window every 30 seconds
+                            if now2 - _failure_window_start > 30.0:
+                                _failure_count = 1
+                                _failure_window_start = now2
+
+                            # If more than 5 failures in 30s, use 5s cooldown
+                            if _failure_count > 5:
+                                reconnect_cooldown = time.monotonic() + 5.0
+                            else:
+                                reconnect_cooldown = time.monotonic() + 1.0
+
+                    time.sleep(0.5)
+                    continue
+
+                loop_start = time.monotonic()
+                ok, frame = self._video_source.read()
+
+                if not ok or frame is None:
+                    self._set_disconnected_frame()
+                    # Camera dropped - try to reopen next iteration.
+                    self._video_source.release()
+                    self._video_source = None
+                    time.sleep(0.5)
+                    continue
+
+                try:
+                    annotated, crack_present, crack_metadata, _masks = annotate_frame(
+                        frame,
+                        weights=self._weights,
+                        conf=self._conf,
+                        imgsz=self._imgsz,
+                    )
+                except Exception:
+                    annotated, crack_present, crack_metadata = frame, False, []
+
+                # Stream the RAW frame (no overlays) for a clean live feed.
+                # The annotated frame is only used for capture analysis.
+                jpeg_bytes = self._encode(frame)
                 with self._lock:
-                    has_pending = self._pending_source_key is not None
-                    current_key = self._source_key
+                    self._latest_jpeg = jpeg_bytes
+                    self._camera_connected = True
+                    self._crack_present = crack_present
+                    self._crack_metadata = crack_metadata
+                    self._last_frame_time = time.monotonic()
 
-                if not has_pending and current_key in self._registry:
-                    now = time.monotonic()
-                    if now >= reconnect_cooldown:
-                        spec = self._registry[current_key].spec
-                        if spec == "letsview://":
-                            vs = LetsViewSource()
-                        else:
-                            vs = VideoSource(spec)
+                # Pass raw frame and metadata to the capture manager for
+                # automatic capture workflow (non-blocking state machine check)
+                try:
+                    self._capture_manager.process_frame(frame, crack_metadata)
+                except Exception:
+                    pass  # Never let capture logic break the live feed
 
-                        if vs.open():
-                            self._video_source = vs
-                            # Successfully reconnected, skip the sleep
-                            continue
-                        else:
-                            vs.release()
-                        # Set next retry 1 second from now
-                        reconnect_cooldown = time.monotonic() + 1.0
+                elapsed = time.monotonic() - loop_start
+                remaining = self._min_frame_interval - elapsed
+                if remaining > 0:
+                    time.sleep(remaining)
 
-                time.sleep(0.5)
-                continue
-
-            loop_start = time.monotonic()
-            ok, frame = self._video_source.read()
-
-            if not ok or frame is None:
-                self._set_disconnected_frame()
-                # Camera dropped - try to reopen next iteration.
-                self._video_source.release()
-                self._video_source = None
-                time.sleep(0.5)
-                continue
-
-            try:
-                annotated, crack_present, crack_metadata, _masks = annotate_frame(
-                    frame,
-                    weights=self._weights,
-                    conf=self._conf,
-                    imgsz=self._imgsz,
-                )
             except Exception:
-                annotated, crack_present, crack_metadata = frame, False, []
-
-            # Stream the RAW frame (no overlays) for a clean live feed.
-            # The annotated frame is only used for capture analysis.
-            jpeg_bytes = self._encode(frame)
-            with self._lock:
-                self._latest_jpeg = jpeg_bytes
-                self._camera_connected = True
-                self._crack_present = crack_present
-                self._crack_metadata = crack_metadata
-
-            # Pass raw frame and metadata to the capture manager for
-            # automatic capture workflow (non-blocking state machine check)
-            try:
-                self._capture_manager.process_frame(frame, crack_metadata)
-            except Exception:
-                pass  # Never let capture logic break the live feed
-
-            elapsed = time.monotonic() - loop_start
-            remaining = self._min_frame_interval - elapsed
-            if remaining > 0:
-                time.sleep(remaining)
+                # Catch-all: log nothing to avoid noise, sleep briefly and continue
+                time.sleep(1.0)
+                continue
 
     def _maybe_switch_source(self) -> None:
         with self._lock:

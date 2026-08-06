@@ -57,7 +57,7 @@ else:
     RESOURCE_DIR = Path(__file__).resolve().parent
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
-CONF = float(os.environ.get("CONF", 0.25))
+CONF = float(os.environ.get("CONF", 0.40))
 TARGET_FPS = float(os.environ.get("TARGET_FPS", 8))
 DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "webcam")
 IP_CAMERA_URL = os.environ.get("IP_CAMERA_URL", "http://192.168.1.50:4747/video")

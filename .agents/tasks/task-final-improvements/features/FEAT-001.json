@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Backend improvements: enhance ML preprocessing (CLAHE, gamma, sharpening, noise reduction), strengthen crack validation (stricter thresholds, DJI UI rejection, adaptive confidence), improve system stability (thread watchdog, auto-recovery, error resilience), and replace LetsView mss capture with Windows Graphics Capture API stub.",
+  "status": "in_progress",
+  "steps": [
+    "1. In inference_core.py, add a preprocess_frame() function before YOLO inference that applies: (a) CLAHE on the L channel of LAB color space, (b) gamma correction (gamma=1.2), (c) light unsharp mask sharpening, (d) bilateral filter for noise reduction while preserving edges. Call this in annotate_frame() before model.predict().",
+    "2. In inference_core.py, raise the default confidence threshold from 0.25 to 0.40 in annotate_frame() function signature. Also update app.py CONF default from 0.25 to 0.40.",
+    "3. In crack_validator.py, add DJI UI rejection: detect if the frame contains common DJI Fly interface elements by checking for high-contrast rectangular regions in the top/bottom 15% of the frame (typical UI overlay zones). Add a filter that rejects detections whose bounding box falls entirely within these UI zones. Increase MIN_CRACK_AREA_PX from 100 to 150, MIN_CRACK_LENGTH_PX from 20 to 30, and MIN_ASPECT_RATIO from 2.0 to 2.5.",
+    "4. In detector.py, add a watchdog mechanism: wrap the _run() loop body in a try/except that catches all exceptions, logs them, sleeps 1 second, and continues. Add a _restart_count counter. If the video source fails more than 5 times in 30 seconds, increase reconnect cooldown to 5 seconds. Add heartbeat tracking (last_frame_time) so external code can detect if the detector is stuck.",
+    "5. In capture_manager.py, add similar resilience: wrap _capture_worker in a broader try/except/finally that always resets _capture_in_progress. Add a timeout mechanism - if _capture_worker takes more than 30 seconds, the state is force-reset to monitoring. Increase VERIFICATION_FRAME_COUNT from 5 to 5 (keep same) but add a requirement that frames must span at least 1.5 seconds (not just 5 consecutive frames that could all arrive in <1s).",
+    "6. Replace letsview_source.py implementation: keep the same LetsViewSource class interface (open/read/release/is_open) but replace the mss-based capture with Windows Graphics Capture API using winsdk package. The new implementation should: (a) find LetsView window by HWND using ctypes/win32, (b) create a GraphicsCaptureItem from the HWND, (c) use Direct3D11CaptureFramePool for frame capture, (d) continue capturing even if the window is covered or partially offscreen. On non-Windows or if winsdk is not available, fall back gracefully (open() returns False). Add 'winsdk' to requirements.txt as an optional dependency with a comment.",
+    "7. In requirements.txt, remove PyGetWindow and mss (no longer needed since letsview_source.py will use winsdk). Add winsdk>=1.0 with a comment that it is Windows-only and optional.",
+    "8. Update tests/test_integration.py: adjust any test that references the old confidence default (0.25) to use 0.40. Add a test for the new preprocess_frame() function (create a dark frame, verify CLAHE brightens it). Add a test verifying DJI UI zone rejection in crack_validator."
+  ],
+  "acceptance_criteria": [
+    "inference_core.annotate_frame() applies CLAHE+gamma+sharpening+noise reduction before inference",
+    "Default confidence threshold is 0.40 in both inference_core.py and app.py",
+    "crack_validator rejects detections in DJI UI zones (top/bottom 15% of frame)",
+    "crack_validator thresholds are stricter: MIN_CRACK_AREA_PX=150, MIN_CRACK_LENGTH_PX=30, MIN_ASPECT_RATIO=2.5",
+    "detector.py has try/except resilience in the main loop with automatic recovery",
+    "letsview_source.py uses winsdk-based Windows Graphics Capture API with graceful fallback",
+    "requirements.txt updated (removed mss/PyGetWindow, added winsdk as optional)",
+    "python tests/test_integration.py passes all tests"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python -c \"from inference_core import annotate_frame; from crack_validator import validate_cracks; from detector import Detector; from letsview_source import LetsViewSource; print('All imports OK')\"",
+    "Run: cd /projects/sandbox/Matanglawin-2.0 && source venv/bin/activate && python tests/test_integration.py"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
