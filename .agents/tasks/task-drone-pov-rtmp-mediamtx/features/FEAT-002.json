@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "feat",
   "description": "Add GPS provider abstraction, GPS database columns, crack region cropping, and GPS-enabled reporting. This feature: (1) creates gps_provider.py with GPSProvider class, (2) adds GPS columns to inspection_db.py, (3) updates capture_manager.py to crop crack regions using bounding box, (4) updates report_generator.py PDF to include GPS location (or 'GPS data unavailable'), (5) updates CSV export to include lat/lon/alt columns, (6) updates tests to cover new functionality.",
-  "status": "pending",
+  "status": "in_progress",
   "steps": [
     "Create gps_provider.py with GPSProvider class. Methods: get_current_position() returns dict with latitude/longitude/altitude/timestamp (all None if unavailable), get_position_at_timestamp(timestamp) for timestamp-based GPS matching, import_gps_log(log_data) to import GPS telemetry data (list of {timestamp, latitude, longitude, altitude} dicts). Store imported GPS log in memory. Use bisect for nearest-timestamp matching with configurable tolerance (default 5 seconds). Never return fake coordinates - return None values if GPS unavailable.",
     "In inspection_db.py: Add migration logic in init_db() to add columns: latitude REAL, longitude REAL, altitude REAL, gps_timestamp TEXT (all nullable via ALTER TABLE ADD COLUMN if not present, same pattern as existing 'notes' migration). Update insert_inspection() to accept and store these GPS fields. Update get_inspection_by_id and query functions to include GPS fields in results (they already use SELECT * so they will automatically appear).",

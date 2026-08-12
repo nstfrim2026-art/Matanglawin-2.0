@@ -43,6 +43,7 @@ from image_quality import validate_image_quality
 from inference_core import annotate_frame
 from inspection_db import init_db, insert_inspection
 from report_generator import generate_csv_record, generate_pdf_report
+from gps_provider import GPSProvider
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,9 @@ VERIFICATION_MIN_SPAN_SECONDS = 1.5
 
 # Maximum time (seconds) for the capture worker before force-reset
 CAPTURE_WORKER_TIMEOUT_SECONDS = 30.0
+
+# Padding ratio for crack region cropping (15% of bbox dimensions on each side)
+CROP_PADDING_RATIO = 0.15
 
 
 class CaptureManager:
@@ -129,6 +133,10 @@ class CaptureManager:
         self._metadata_dir = os.path.join(self._captures_dir, "metadata")
         self._reports_dir = os.path.join(self._captures_dir, "reports")
         self._exports_dir = os.path.join(self._captures_dir, "exports")
+        self._crops_dir = os.path.join(self._captures_dir, "crops")
+
+        # GPS provider for geolocation
+        self._gps_provider = GPSProvider()
 
         # Initialize database
         init_db()
@@ -449,12 +457,47 @@ class CaptureManager:
             h, w = raw_frame.shape[:2]
             image_resolution = f"{w}x{h}"
 
+            # Crop crack region from raw frame using primary detection bbox
+            crop_path = None
+            try:
+                bbox = primary["bbox"]  # [x1, y1, x2, y2]
+                x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+                bbox_w = x2 - x1
+                bbox_h = y2 - y1
+
+                # Add padding (15% of bbox dimensions on each side)
+                pad_x = int(bbox_w * CROP_PADDING_RATIO)
+                pad_y = int(bbox_h * CROP_PADDING_RATIO)
+
+                # Clamp to frame boundaries
+                crop_x1 = max(0, x1 - pad_x)
+                crop_y1 = max(0, y1 - pad_y)
+                crop_x2 = min(w, x2 + pad_x)
+                crop_y2 = min(h, y2 + pad_y)
+
+                cropped = raw_frame[crop_y1:crop_y2, crop_x1:crop_x2]
+
+                if cropped.size > 0:
+                    os.makedirs(self._crops_dir, exist_ok=True)
+                    crop_filename = f"{capture_id}_crop.jpg"
+                    crop_path = os.path.join(self._crops_dir, crop_filename)
+                    cv2.imwrite(crop_path, cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            except Exception:
+                crop_path = None
+
+            # Get GPS position for this capture
+            gps_data = self._gps_provider.get_current_position()
+            # Try timestamp-based matching if GPS log is loaded
+            if gps_data["latitude"] is None and self._gps_provider.log_size > 0:
+                gps_data = self._gps_provider.get_position_at_timestamp(timestamp)
+
             # Step 4: Save to new directory structure
             os.makedirs(self._images_dir, exist_ok=True)
             os.makedirs(self._overlays_dir, exist_ok=True)
             os.makedirs(self._metadata_dir, exist_ok=True)
             os.makedirs(self._reports_dir, exist_ok=True)
             os.makedirs(self._exports_dir, exist_ok=True)
+            os.makedirs(self._crops_dir, exist_ok=True)
 
             image_filename = f"{capture_id}.jpg"
             image_path = os.path.join(self._images_dir, image_filename)
@@ -493,6 +536,11 @@ class CaptureManager:
                 "overlay_path": overlay_path,
                 "metadata_path": metadata_path,
                 "report_path": report_path,
+                "crop_path": crop_path,
+                "latitude": gps_data["latitude"],
+                "longitude": gps_data["longitude"],
+                "altitude": gps_data["altitude"],
+                "gps_timestamp": gps_data["timestamp"],
                 "all_detections": validated_metadata,
                 "quality_check": quality_result,
             }
@@ -503,7 +551,10 @@ class CaptureManager:
 
             # Generate PDF report
             try:
-                generate_pdf_report(metadata, image_path, overlay_path, report_path)
+                generate_pdf_report(
+                    metadata, image_path, overlay_path, report_path,
+                    crop_path=crop_path
+                )
             except Exception:
                 pass  # Non-fatal: report generation failure should not stop workflow
 
@@ -520,6 +571,9 @@ class CaptureManager:
                 "camera_source": camera_source,
                 "detection_threshold": threshold,
                 "image_resolution": image_resolution,
+                "latitude": gps_data["latitude"],
+                "longitude": gps_data["longitude"],
+                "altitude": gps_data["altitude"],
             }
             try:
                 generate_csv_record(csv_record, csv_path)
@@ -543,6 +597,11 @@ class CaptureManager:
                 "overlay_path": overlay_path,
                 "metadata_path": metadata_path,
                 "report_path": report_path,
+                "latitude": gps_data["latitude"],
+                "longitude": gps_data["longitude"],
+                "altitude": gps_data["altitude"],
+                "gps_timestamp": gps_data["timestamp"],
+                "crop_path": crop_path,
             }
             try:
                 insert_inspection(db_record)

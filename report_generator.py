@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import csv
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fpdf import FPDF
 
@@ -29,6 +29,9 @@ CSV_COLUMNS = [
     "camera_source",
     "detection_threshold",
     "image_resolution",
+    "latitude",
+    "longitude",
+    "altitude",
 ]
 
 
@@ -37,6 +40,7 @@ def generate_pdf_report(
     image_path: str,
     overlay_path: str,
     output_path: str,
+    crop_path: Optional[str] = None,
 ) -> str:
     """
     Generate a professional PDF inspection report.
@@ -46,6 +50,7 @@ def generate_pdf_report(
         image_path: path to the original captured image
         overlay_path: path to the segmentation overlay image
         output_path: path where the PDF should be saved
+        crop_path: optional path to the cropped crack region image
 
     Returns:
         The output_path on success.
@@ -92,6 +97,47 @@ def generate_pdf_report(
         pdf.cell(0, 7, str(value), ln=True, border=0)
 
     pdf.ln(8)
+
+    # Location section (GPS)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Location", ln=True)
+    pdf.ln(2)
+
+    lat = inspection_data.get("latitude")
+    lon = inspection_data.get("longitude")
+    alt = inspection_data.get("altitude")
+
+    if lat is not None and lon is not None:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(col_width, 7, "Latitude:", border=0)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, f"{lat:.6f}", ln=True, border=0)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(col_width, 7, "Longitude:", border=0)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, f"{lon:.6f}", ln=True, border=0)
+        if alt is not None:
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.cell(col_width, 7, "Altitude:", border=0)
+            pdf.set_font("Helvetica", "", 10)
+            pdf.cell(0, 7, f"{alt:.1f} m", ln=True, border=0)
+    else:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, "GPS data unavailable", ln=True)
+
+    pdf.ln(8)
+
+    # Cropped crack image
+    if crop_path and os.path.isfile(crop_path):
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, "Cropped Crack Region", ln=True)
+        pdf.ln(2)
+        try:
+            pdf.image(crop_path, w=140)
+        except Exception:
+            pdf.cell(0, 8, "[Crop image could not be embedded]", ln=True)
+        pdf.ln(6)
 
     # Original image
     if os.path.isfile(image_path):

@@ -34,6 +34,7 @@ def test_all_imports():
     import crack_validator  # noqa: F401
     import inspection_db  # noqa: F401
     import report_generator  # noqa: F401
+    import gps_provider  # noqa: F401
 
     # Verify letsview_source no longer exists
     import importlib
@@ -551,6 +552,239 @@ def test_temporal_verification():
     print()
 
 
+def test_gps_provider():
+    """Verify GPS provider functionality."""
+    print("=== GPS PROVIDER TESTS ===")
+    from gps_provider import GPSProvider, DEFAULT_GPS_TOLERANCE_SECONDS
+
+    # Instantiation
+    gps = GPSProvider()
+    assert gps is not None
+    print("  [PASS] GPSProvider instantiates successfully")
+
+    # get_current_position returns all None (no live GPS from DJI Neo 2)
+    pos = gps.get_current_position()
+    assert pos["latitude"] is None
+    assert pos["longitude"] is None
+    assert pos["altitude"] is None
+    assert pos["timestamp"] is None
+    print("  [PASS] get_current_position() returns None values (no live GPS)")
+
+    # Default tolerance
+    assert gps.tolerance_seconds == DEFAULT_GPS_TOLERANCE_SECONDS
+    print(f"  [PASS] Default tolerance = {DEFAULT_GPS_TOLERANCE_SECONDS}s")
+
+    # import_gps_log with valid data
+    log_data = [
+        {"timestamp": "2026-08-12T14:32:15.000", "latitude": 7.123450, "longitude": 125.123450, "altitude": 120.0},
+        {"timestamp": "2026-08-12T14:32:18.000", "latitude": 7.123452, "longitude": 125.123455, "altitude": 123.4},
+        {"timestamp": "2026-08-12T14:32:21.000", "latitude": 7.123454, "longitude": 125.123460, "altitude": 125.0},
+    ]
+    imported = gps.import_gps_log(log_data)
+    assert imported == 3, f"Expected 3 imported, got {imported}"
+    assert gps.log_size == 3
+    print(f"  [PASS] import_gps_log() imported {imported} points")
+
+    # get_position_at_timestamp - exact match
+    pos = gps.get_position_at_timestamp("2026-08-12T14:32:18.000")
+    assert pos["latitude"] == 7.123452
+    assert pos["longitude"] == 125.123455
+    assert pos["altitude"] == 123.4
+    print("  [PASS] get_position_at_timestamp() exact match works")
+
+    # get_position_at_timestamp - close match (within tolerance)
+    pos = gps.get_position_at_timestamp("2026-08-12T14:32:19.000")
+    # Should match the 14:32:18 point (1 second away)
+    assert pos["latitude"] == 7.123452
+    assert pos["longitude"] == 125.123455
+    print("  [PASS] get_position_at_timestamp() close match within tolerance")
+
+    # get_position_at_timestamp - out of tolerance
+    pos = gps.get_position_at_timestamp("2026-08-12T14:33:00.000")
+    assert pos["latitude"] is None
+    assert pos["longitude"] is None
+    print("  [PASS] get_position_at_timestamp() returns None when out of tolerance")
+
+    # import_gps_log with invalid entries (missing fields)
+    bad_log = [
+        {"timestamp": "2026-08-12T14:32:18.000"},  # missing lat/lon
+        {"latitude": 7.0, "longitude": 125.0},  # missing timestamp
+        {"timestamp": "2026-08-12T14:32:18.000", "latitude": 7.0, "longitude": 125.0},  # valid
+    ]
+    gps2 = GPSProvider()
+    imported2 = gps2.import_gps_log(bad_log)
+    assert imported2 == 1, f"Expected 1 valid import from bad log, got {imported2}"
+    print("  [PASS] import_gps_log() skips invalid entries")
+
+    # Configurable tolerance
+    gps3 = GPSProvider(tolerance_seconds=1.0)
+    gps3.import_gps_log(log_data)
+    pos = gps3.get_position_at_timestamp("2026-08-12T14:32:19.500")
+    # 1.5 seconds away from nearest - exceeds 1.0 tolerance
+    assert pos["latitude"] is None
+    print("  [PASS] Custom tolerance (1.0s) correctly rejects match beyond threshold")
+    print()
+
+
+def test_database_gps_columns():
+    """Verify GPS columns exist in the database schema."""
+    print("=== DATABASE GPS COLUMNS TESTS ===")
+    import inspection_db
+    import sqlite3
+
+    inspection_db.init_db()
+    conn = sqlite3.connect(inspection_db._DB_PATH)
+    cursor = conn.execute("PRAGMA table_info(inspections)")
+    columns = [row[1] for row in cursor.fetchall()]
+    conn.close()
+
+    assert "latitude" in columns, "latitude column missing"
+    assert "longitude" in columns, "longitude column missing"
+    assert "altitude" in columns, "altitude column missing"
+    assert "gps_timestamp" in columns, "gps_timestamp column missing"
+    assert "crop_path" in columns, "crop_path column missing"
+    print("  [PASS] GPS columns (latitude, longitude, altitude, gps_timestamp) exist")
+    print("  [PASS] crop_path column exists")
+
+    # Test insert with GPS data
+    row_id = inspection_db.insert_inspection({
+        "capture_id": "TEST-GPS-001",
+        "timestamp": "2026-08-12T14:32:18Z",
+        "confidence": 0.95,
+        "classification": "crack",
+        "latitude": 7.123452,
+        "longitude": 125.123455,
+        "altitude": 123.4,
+        "gps_timestamp": "2026-08-12T14:32:18.000",
+        "crop_path": "/test/crops/TEST-GPS-001_crop.jpg",
+    })
+    assert row_id > 0
+    print(f"  [PASS] insert_inspection() with GPS data succeeded (id={row_id})")
+
+    # Verify GPS data is retrievable
+    record = inspection_db.get_inspection_by_id("TEST-GPS-001")
+    assert record is not None
+    assert record["latitude"] == 7.123452
+    assert record["longitude"] == 125.123455
+    assert record["altitude"] == 123.4
+    assert record["gps_timestamp"] == "2026-08-12T14:32:18.000"
+    assert record["crop_path"] == "/test/crops/TEST-GPS-001_crop.jpg"
+    print("  [PASS] GPS data retrieved correctly from database")
+
+    # Test insert without GPS data (nullable)
+    row_id2 = inspection_db.insert_inspection({
+        "capture_id": "TEST-GPS-002",
+        "timestamp": "2026-08-12T14:35:00Z",
+        "confidence": 0.88,
+        "classification": "crack",
+    })
+    assert row_id2 > 0
+    record2 = inspection_db.get_inspection_by_id("TEST-GPS-002")
+    assert record2["latitude"] is None
+    assert record2["longitude"] is None
+    assert record2["altitude"] is None
+    print("  [PASS] insert_inspection() without GPS data works (nullable)")
+
+    # Cleanup
+    inspection_db.delete_inspection("TEST-GPS-001")
+    inspection_db.delete_inspection("TEST-GPS-002")
+    print()
+
+
+def test_report_generator_with_gps():
+    """Verify PDF report with GPS data and crop image."""
+    print("=== REPORT GENERATOR GPS TESTS ===")
+    from report_generator import generate_pdf_report, CSV_COLUMNS
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        # Create dummy images
+        dummy = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+        image_path = os.path.join(tmp_dir, "test_image.jpg")
+        overlay_path = os.path.join(tmp_dir, "test_overlay.jpg")
+        crop_path = os.path.join(tmp_dir, "test_crop.jpg")
+        cv2.imwrite(image_path, dummy)
+        cv2.imwrite(overlay_path, dummy)
+        # Create a smaller crop
+        crop_img = dummy[100:300, 50:250]
+        cv2.imwrite(crop_path, crop_img)
+
+        # Test with GPS data
+        inspection_data_gps = {
+            "capture_id": "TEST-PDF-GPS-001",
+            "timestamp": "2026-08-12T14:32:18Z",
+            "classification": "crack",
+            "confidence": 0.95,
+            "crack_area": 150,
+            "estimated_length": 45.2,
+            "estimated_width": 5.3,
+            "bbox": [10, 20, 100, 200],
+            "camera_source": "drone",
+            "detection_threshold": 0.85,
+            "image_resolution": "640x480",
+            "latitude": 7.123452,
+            "longitude": 125.123455,
+            "altitude": 123.4,
+        }
+
+        output_path_gps = os.path.join(tmp_dir, "reports", "test_gps_report.pdf")
+        result = generate_pdf_report(
+            inspection_data_gps, image_path, overlay_path, output_path_gps,
+            crop_path=crop_path
+        )
+        assert os.path.exists(output_path_gps), "PDF with GPS not created"
+        size = os.path.getsize(output_path_gps)
+        assert size > 100, f"PDF with GPS too small: {size} bytes"
+        print(f"  [PASS] PDF report with GPS data generated ({size} bytes)")
+
+        # Test without GPS data
+        inspection_data_no_gps = {
+            "capture_id": "TEST-PDF-NOGPS-001",
+            "timestamp": "2026-08-12T14:35:00Z",
+            "classification": "crack",
+            "confidence": 0.88,
+            "crack_area": 120,
+            "estimated_length": 38.0,
+            "estimated_width": 4.0,
+            "bbox": [20, 30, 110, 180],
+            "camera_source": "drone",
+            "detection_threshold": 0.85,
+            "image_resolution": "640x480",
+            "latitude": None,
+            "longitude": None,
+            "altitude": None,
+        }
+
+        output_path_no_gps = os.path.join(tmp_dir, "reports", "test_no_gps_report.pdf")
+        result = generate_pdf_report(
+            inspection_data_no_gps, image_path, overlay_path, output_path_no_gps
+        )
+        assert os.path.exists(output_path_no_gps), "PDF without GPS not created"
+        size2 = os.path.getsize(output_path_no_gps)
+        assert size2 > 100, f"PDF without GPS too small: {size2} bytes"
+        print(f"  [PASS] PDF report without GPS data generated ({size2} bytes)")
+
+        # Test CSV columns include GPS
+        assert "latitude" in CSV_COLUMNS, "CSV_COLUMNS missing latitude"
+        assert "longitude" in CSV_COLUMNS, "CSV_COLUMNS missing longitude"
+        assert "altitude" in CSV_COLUMNS, "CSV_COLUMNS missing altitude"
+        print("  [PASS] CSV_COLUMNS includes latitude, longitude, altitude")
+
+    finally:
+        shutil.rmtree(tmp_dir)
+    print()
+
+
+def test_crop_padding_ratio():
+    """Verify crop padding ratio constant exists in capture_manager."""
+    print("=== CROP PADDING RATIO TESTS ===")
+    from capture_manager import CROP_PADDING_RATIO
+
+    assert CROP_PADDING_RATIO == 0.15, f"Expected 0.15, got {CROP_PADDING_RATIO}"
+    print(f"  [PASS] CROP_PADDING_RATIO = {CROP_PADDING_RATIO}")
+    print()
+
+
 def main():
     """Run all integration tests."""
     print("=" * 60)
@@ -567,6 +801,10 @@ def main():
     test_preprocess_frame()
     test_confidence_default()
     test_temporal_verification()
+    test_gps_provider()
+    test_database_gps_columns()
+    test_report_generator_with_gps()
+    test_crop_padding_ratio()
 
     print("=" * 60)
     print("ALL INTEGRATION TESTS PASSED")

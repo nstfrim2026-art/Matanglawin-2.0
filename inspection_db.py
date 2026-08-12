@@ -68,6 +68,31 @@ def init_db() -> None:
             conn.execute(
                 "ALTER TABLE inspections ADD COLUMN notes TEXT DEFAULT ''"
             )
+
+        # Migrate: add GPS columns if not present
+        if "latitude" not in columns:
+            conn.execute(
+                "ALTER TABLE inspections ADD COLUMN latitude REAL"
+            )
+        if "longitude" not in columns:
+            conn.execute(
+                "ALTER TABLE inspections ADD COLUMN longitude REAL"
+            )
+        if "altitude" not in columns:
+            conn.execute(
+                "ALTER TABLE inspections ADD COLUMN altitude REAL"
+            )
+        if "gps_timestamp" not in columns:
+            conn.execute(
+                "ALTER TABLE inspections ADD COLUMN gps_timestamp TEXT"
+            )
+
+        # Migrate: add crop_path column if not present
+        if "crop_path" not in columns:
+            conn.execute(
+                "ALTER TABLE inspections ADD COLUMN crop_path TEXT"
+            )
+
         conn.commit()
     finally:
         conn.close()
@@ -96,8 +121,9 @@ def insert_inspection(data: Dict[str, Any]) -> int:
                 estimated_length, estimated_width, bbox,
                 camera_source, detection_threshold, image_resolution,
                 classification, image_path, overlay_path,
-                metadata_path, report_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                metadata_path, report_path,
+                latitude, longitude, altitude, gps_timestamp, crop_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 data["capture_id"],
@@ -115,6 +141,11 @@ def insert_inspection(data: Dict[str, Any]) -> int:
                 data.get("overlay_path"),
                 data.get("metadata_path"),
                 data.get("report_path"),
+                data.get("latitude"),
+                data.get("longitude"),
+                data.get("altitude"),
+                data.get("gps_timestamp"),
+                data.get("crop_path"),
             ),
         )
         conn.commit()
