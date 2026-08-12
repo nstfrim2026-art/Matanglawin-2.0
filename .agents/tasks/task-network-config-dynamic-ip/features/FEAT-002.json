@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Add Network Status panel to dashboard.html UI, implement frontend /api/network polling, add stream status indicator (LIVE/OFFLINE), and handle RTMP disconnections gracefully with visual state.",
+  "status": "in_progress",
+  "steps": [
+    "In templates/dashboard.html: Add a 'Network Status' panel inside the live-detection section (between the threshold slider area and the analysis panel, or as a sub-panel within the live feed panel). The panel should display: (a) PC IP address (host_ip from /api/network), (b) DJI RTMP Address (rtmp_address), (c) Stream Key (stream_key). Add a stream status indicator (LIVE/OFFLINE badge) next to or replacing the existing live-indicator-text 'DRONE POV'. The indicator should show green 'LIVE' when camera_connected is true, red 'OFFLINE' when false.",
+    "In static/js/dashboard.js: (a) Add a new poll function pollNetwork() that calls GET /api/network every 10 seconds (10000ms). On success, update the Network Status panel elements with host_ip, rtmp_address, stream_key. (b) Update the existing applyStatus() function to set the stream status indicator based on camera_connected. When camera_connected changes from true to false, show OFFLINE state gracefully (no page crash, keep polling). When it changes back, show LIVE. (c) Wire pollNetwork() into the init() function with setInterval.",
+    "In static/style.css: Add styles for the network-status-panel (consistent with existing dark theme card style using var(--card-bg), var(--card-border), var(--radius)). Style the LIVE/OFFLINE indicator (green dot + text for LIVE, red dot + text for OFFLINE). Ensure responsive layout on mobile."
+  ],
+  "acceptance_criteria": [
+    "Dashboard HTML contains a Network Status panel with elements for host_ip, rtmp_address, stream_key display",
+    "Frontend polls /api/network every 10 seconds and updates the panel dynamically",
+    "Stream status shows LIVE (green) when camera_connected is true from /status",
+    "Stream status shows OFFLINE (red) when camera_connected is false",
+    "RTMP disconnection is handled gracefully - UI shows OFFLINE state and auto-recovers when reconnected",
+    "All existing dashboard functionality preserved (alert banner, audio, crack analysis, threshold slider, WebRTC iframe)"
+  ],
+  "verification": [
+    "Run: python -c \"from app import app; c = app.test_client(); r = c.get('/'); assert b'network-status' in r.data or b'networkStatus' in r.data; assert b'/api/network' in r.data or b'api/network' in r.data; print('Dashboard has network panel')\"",
+    "Run: python tests/test_integration.py and confirm all tests pass including the dashboard content assertions"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

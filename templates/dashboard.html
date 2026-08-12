@@ -131,6 +131,7 @@
           <div class="live-feed-header">
             <span class="live-indicator" id="liveDot"></span>
             <span class="live-indicator-text">DRONE POV</span>
+            <span class="stream-status-badge offline" id="streamStatusBadge">OFFLINE</span>
           </div>
           <div class="live-feed-frame">
             <iframe id="droneStream" src="{{ mediamtx_url }}/matanglawin" class="live-feed-iframe" allow="autoplay" allowfullscreen></iframe>
@@ -155,6 +156,27 @@
             <div class="analysis-empty">
               <p>No cracks detected - Monitoring...</p>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Network Status Panel -->
+      <div class="network-status-panel" id="networkStatusPanel">
+        <div class="network-status-header">
+          <h4 class="network-status-title">Network Status</h4>
+        </div>
+        <div class="network-status-grid">
+          <div class="network-status-item">
+            <span class="network-status-label">PC IP</span>
+            <span class="network-status-value" id="networkHostIp">--</span>
+          </div>
+          <div class="network-status-item">
+            <span class="network-status-label">DJI RTMP Address</span>
+            <span class="network-status-value" id="networkRtmpAddress">--</span>
+          </div>
+          <div class="network-status-item">
+            <span class="network-status-label">Stream Key</span>
+            <span class="network-status-value" id="networkStreamKey">--</span>
           </div>
         </div>
       </div>

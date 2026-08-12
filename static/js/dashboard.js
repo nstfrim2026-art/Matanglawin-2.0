@@ -18,6 +18,7 @@
 
   var STATUS_POLL_MS = 1000;
   var ANALYSIS_POLL_MS = 1500;
+  var NETWORK_POLL_MS = 10000;
   var ALERT_COOLDOWN_MS = 5000;
 
   // Elements
@@ -32,6 +33,10 @@
   var droneStream = document.getElementById("droneStream");
   var streamDisconnected = document.getElementById("streamDisconnected");
   var crackAlertBanner = document.getElementById("crackAlertBanner");
+  var streamStatusBadge = document.getElementById("streamStatusBadge");
+  var networkHostIp = document.getElementById("networkHostIp");
+  var networkRtmpAddress = document.getElementById("networkRtmpAddress");
+  var networkStreamKey = document.getElementById("networkStreamKey");
 
   var loadingDismissed = false;
   var cameraWasConnected = false;
@@ -190,6 +195,19 @@
     // Drive stream overlay from backend camera_connected flag
     updateStreamOverlayFromStatus(cameraConnected);
 
+    // Stream status badge (LIVE / OFFLINE)
+    if (streamStatusBadge) {
+      if (cameraConnected) {
+        streamStatusBadge.textContent = "LIVE";
+        streamStatusBadge.classList.remove("offline");
+        streamStatusBadge.classList.add("live");
+      } else {
+        streamStatusBadge.textContent = "OFFLINE";
+        streamStatusBadge.classList.remove("live");
+        streamStatusBadge.classList.add("offline");
+      }
+    }
+
     // Live indicator
     if (liveDot) {
       if (cameraConnected) {
@@ -221,6 +239,29 @@
     } catch (err) {
       if (liveDot) liveDot.classList.remove("online");
       cameraWasConnected = false;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Network polling
+  // -----------------------------------------------------------------------
+
+  async function pollNetwork() {
+    try {
+      var res = await fetch("/api/network", { cache: "no-store" });
+      if (!res.ok) throw new Error("bad response");
+      var data = await res.json();
+      if (networkHostIp) {
+        networkHostIp.textContent = data.host_ip || "--";
+      }
+      if (networkRtmpAddress) {
+        networkRtmpAddress.textContent = data.rtmp_address || "--";
+      }
+      if (networkStreamKey) {
+        networkStreamKey.textContent = data.stream_key || "--";
+      }
+    } catch (err) {
+      /* ignore - network info is non-critical */
     }
   }
 
@@ -499,8 +540,10 @@
     // Start polling
     pollStatus();
     pollAnalysis();
+    pollNetwork();
     setInterval(pollStatus, STATUS_POLL_MS);
     setInterval(pollAnalysis, ANALYSIS_POLL_MS);
+    setInterval(pollNetwork, NETWORK_POLL_MS);
 
     // Scroll-based nav highlighting
     window.addEventListener("scroll", updateActiveNav);

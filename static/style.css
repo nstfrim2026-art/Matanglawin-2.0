@@ -1034,6 +1034,111 @@ body {
 }
 
 /* -------------------------------------------------------------------------
+   Stream Status Badge (LIVE/OFFLINE)
+   ------------------------------------------------------------------------- */
+
+.stream-status-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.stream-status-badge::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.stream-status-badge.live {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.stream-status-badge.live::before {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+.stream-status-badge.offline {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.stream-status-badge.offline::before {
+  background: #ef4444;
+}
+
+/* -------------------------------------------------------------------------
+   Network Status Panel
+   ------------------------------------------------------------------------- */
+
+.network-status-panel {
+  margin-top: 24px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.network-status-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.network-status-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.network-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+}
+
+.network-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 20px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.network-status-item:last-child {
+  border-right: none;
+}
+
+.network-status-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-gray);
+}
+
+.network-status-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  word-break: break-all;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* -------------------------------------------------------------------------
    Responsive Design
    ------------------------------------------------------------------------- */
 
@@ -1151,6 +1256,19 @@ body {
   .source-selector {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .network-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .network-status-item {
+    border-right: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .network-status-item:last-child {
+    border-bottom: none;
   }
 }
 

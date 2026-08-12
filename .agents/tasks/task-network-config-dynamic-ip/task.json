@@ -1,0 +1,7 @@
+{
+  "task_id": "task-network-config-dynamic-ip",
+  "task_description": "Remove all hardcoded LAN IP addresses from runtime code, implement dynamic IP detection with env var override, add /api/network endpoint, add Network Status panel to dashboard with LIVE/OFFLINE stream indicator, add comprehensive tests and update documentation for the DJI Neo 2 RTMP/MediaMTX architecture.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
