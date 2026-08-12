@@ -24,6 +24,15 @@ Both workflows share the same trained model and the same underlying
 mask-overlay drawing code - nothing about the model or its weights was
 changed to add the live pipeline.
 
+**The live "Drone POV" is always a clean, unannotated video feed.**
+Detection runs entirely server-side and is invisible to the viewer:
+there is no red mask, no bounding box, no label, and no confidence
+score drawn on the live stream, ever. The only place a red
+segmentation-mask visualization is produced is internally, at the
+moment of an automatic capture, on a small crop around that one crack
+instance - never on the live feed, and never exposed through any
+Flask route (see "Automatic capture" below).
+
 ### Live drone architecture
 
 ```
@@ -38,13 +47,22 @@ RTSP (rtsp://localhost:8554/...)  WebRTC (http://localhost:8889/...)
     |                             |
     v                             v
 YOLO11-seg (detector.py)     MatanglaWIN website <dashboard>
-    |                        (live drone POV, in-browser,
-    v                         no OBS/VLC/LetsView/screen-mirroring)
-Crack detection (detector.py)
-    |
+    |                        (LIVE DRONE POV - raw MediaMTX WebRTC
+    v                         feed, completely clean: no OBS, no VLC,
+Crack detection (detector.py)  no LetsView, no screen-mirroring, and
+    |                          NO detection overlay of any kind)
     v
-Automatic capture (capture_manager.py)
-    |-- cropped crack image
+Automatic capture (capture_manager.py) - happens invisibly, server-side
+    |-- captures/original/  - full captured frame (evidence only)
+    |-- captures/crack/     - crack-ONLY image, extracted using the
+    |                         actual YOLO segmentation mask (not a
+    |                         bounding box) - this is what the
+    |                         dashboard's "Latest Capture" panel and
+    |                         PDF reports show, completely separate
+    |                         from the live POV above
+    |-- captures/overlays/  - small, internal-only red-mask
+    |                         visualization crop, for diagnostics;
+    |                         never served by any Flask route
     |-- detection info (confidence, bbox, instance count)
     |-- timestamp
     |-- GPS (when available - gps_provider.py; never fabricated)
@@ -59,6 +77,46 @@ app - it must already be running (see "Running MediaMTX" below). The
 app only *reads* from it (RTSP frames for AI, and a reachability probe
 for the dashboard's "MediaMTX reachable" indicator) and *tells you*
 what RTMP address to type into DJI Fly.
+
+### Automatic capture - clean POV vs. crack-only result
+
+These two things are intentionally, completely separate:
+
+- **LIVE DRONE POV** (`/dashboard`'s "Drone POV" panel) - the raw
+  MediaMTX WebRTC stream, loaded directly into the browser via an
+  `<iframe>`. The backend never touches, re-encodes, or annotates these
+  frames. There is no route that serves an annotated version of the
+  live feed - `detector.py`'s `process_frame()` never produces (and
+  `DetectionResult` never carries) a full-frame overlay image.
+- **LATEST CRACK RESULT** (`/dashboard`'s "Latest Capture" panel, and
+  every row on `/inspections`) - a single still image produced only at
+  the moment of a valid detection, using the actual YOLO11-seg
+  segmentation mask (`detector.extract_crack_only()`) to black out
+  everything the mask doesn't cover. This is a small crop around the
+  crack (with a thin context margin), not a large rectangular slab of
+  surrounding surface, and not the live video.
+
+Each automatic capture writes to three subfolders under
+`matanglawin_data/captures/`:
+
+| Folder | Contents | Exposed via a route? |
+|---|---|---|
+| `original/` | The full captured frame, unmodified - kept as evidence of what the drone saw at capture time. | No |
+| `crack/` | The crack-ONLY result (mask-based, background suppressed). | Yes - `/data/captures/crack/<file>`, used by the dashboard and PDF reports. |
+| `overlays/` | A small, per-instance red-mask visualization crop, generated for internal diagnostics/QA only. | **No.** Nothing in this app links to, serves, or displays this folder - see "No full-frame preview" below. |
+
+### No full-frame preview
+
+There is deliberately **no** route or code path anywhere in this app
+that serves an annotated full-frame image (i.e. the whole drone frame
+with a red mask/box/label drawn on it). An earlier debug-only route,
+`/stream/preview.jpg`, existed for this purpose and has been removed
+entirely, along with the `LivePipeline.get_latest_overlay_jpeg()`
+plumbing that fed it. The segmentation/red-mask visualization step
+still happens (see `detector.crack_overlay_crop()`), but its output is
+written only to `captures/overlays/` for internal use, on a small crop
+around a single detected instance - never on the full frame, and never
+reachable from the browser.
 
 ### Dynamic network configuration - no hardcoded LAN IPs
 
@@ -199,9 +257,9 @@ Optional environment variables:
 - `infer_overlay.py` - original standalone CLI script (unchanged)
 - `network_config.py` - single source of truth for LAN IP detection, DJI RTMP address, stream key, localhost RTSP/WebRTC URLs, MediaMTX reachability
 - `gps_provider.py` - optional GPS fix lookup (env override or pluggable future source); never fabricates coordinates
-- `detector.py` - per-frame YOLO11-seg wrapper + crack validation/cropping for the live pipeline
+- `detector.py` - per-frame YOLO11-seg wrapper + crack validation; `extract_crack_only()` (mask-based, background-suppressed crack extraction) and `crack_overlay_crop()` (internal-only red-mask diagnostic crop) - never produces a full-frame overlay
 - `video_source.py` - background RTSP reader with OFFLINE/CONNECTING/LIVE state, resilient to MediaMTX/drone disconnects
-- `capture_manager.py` - automatic cropped-capture orchestration with cooldown/debounce + GPS attachment
+- `capture_manager.py` - automatic capture orchestration with cooldown/debounce + GPS attachment; writes `captures/original/`, `captures/crack/`, `captures/overlays/` (see "Automatic capture" above)
 - `inspection_db.py` - SQLite-backed inspection record storage
 - `report_generator.py` - PDF inspection report generation (single crack / full report), GPS-optional
 - `live_pipeline.py` - wires video_source + detector + capture_manager together into one background pipeline
@@ -276,12 +334,23 @@ no real LAN available in this sandbox):
 - RTSP video source state machine (OFFLINE / CONNECTING / LIVE) against
   both a real (absent) RTSP endpoint and a mocked `cv2.VideoCapture`
   simulating a live stream and a mid-stream disconnect
-- Per-frame crack detection, minimum-area filtering, and crop-with-margin
-  logic (`detector.py`) using a mocked YOLO result (no real YOLO
-  installed in the test environment)
-- Capture cooldown/debounce, low-confidence rejection, and GPS
-  attachment (present and unavailable) end-to-end into a real SQLite
-  database (`capture_manager.py`, `inspection_db.py`)
+- Per-frame crack detection, minimum-area filtering, and mask-based
+  crack-only extraction (`detector.extract_crack_only()` correctly
+  suppresses background pixels outside the segmentation mask, verified
+  against both a thin/diagonal mask and a fully-filled mask) using a
+  mocked YOLO result (no real YOLO installed in the test environment)
+- Capture cooldown/debounce, low-confidence rejection, GPS attachment
+  (present and unavailable), and the three-way `original/`/`crack/`/
+  `overlays/` file layout end-to-end into a real SQLite database
+  (`capture_manager.py`, `inspection_db.py`)
+- The `/data/captures/<path:filename>` route correctly serves files
+  inside the new `crack/`/`original/`/`overlays/` subfolders, and the
+  dashboard/inspections frontend correctly builds URLs that include
+  the subfolder (a bug where `.split('/').pop()` dropped the subfolder
+  and 404'd was caught by a regression test and fixed)
+- Confirmed no route or template references `/stream/preview.jpg` (it
+  has been removed entirely, along with the full-frame overlay
+  plumbing that fed it)
 - PDF generation for single/full reports, with and without GPS, with a
   missing image, and with zero inspections (`report_generator.py`)
 - All new Flask routes (`/api/network`, `/api/mediamtx/status`,

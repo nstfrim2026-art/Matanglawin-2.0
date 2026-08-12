@@ -17,6 +17,25 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+/**
+ * Build the /data/captures/... URL for a stored capture path.
+ *
+ * `cropped_image_path` is an absolute filesystem path such as
+ * ".../matanglawin_data/captures/crack/crack_20260812_101500.jpg" -
+ * captures now live under original/, crack/, and overlays/
+ * subfolders (see capture_manager.py), so we must keep the
+ * "crack/<filename>" part, not just the bare filename, or the image
+ * 404s against the flat /data/captures/<filename> route.
+ */
+function captureUrl(storedPath) {
+  if (!storedPath) return '';
+  const normalized = storedPath.replace(/\\/g, '/');
+  const marker = '/captures/';
+  const idx = normalized.lastIndexOf(marker);
+  const relative = idx >= 0 ? normalized.slice(idx + marker.length) : normalized.split('/').pop();
+  return '/data/captures/' + relative;
+}
+
 async function refreshNetwork() {
   try {
     const res = await fetch('/api/network');
@@ -101,8 +120,7 @@ async function refreshLatestCapture() {
 
     if (empty) empty.style.display = 'none';
     if (img) {
-      const filename = (rec.cropped_image_path || '').split('/').pop();
-      img.src = '/data/captures/' + filename;
+      img.src = captureUrl(rec.cropped_image_path);
       img.style.display = 'block';
     }
     setText('latest-confidence', (rec.confidence * 100).toFixed(1) + '%');

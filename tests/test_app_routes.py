@@ -117,7 +117,37 @@ def test_single_report_for_nonexistent_inspection_is_404(client):
     assert resp.status_code == 404
 
 
-def test_stream_preview_without_a_live_frame_is_404(client):
+def test_capture_file_route_serves_nested_subfolder_paths(client):
+    """
+    Captures now live under captures/original|crack|overlays/ (see
+    capture_manager.py) - the /data/captures/<path:filename> route must
+    serve files inside those subfolders, e.g. "crack/foo.jpg", not just
+    flat top-level filenames.
+    """
+    import app as appmod
+    import cv2
+    import numpy as np
+
+    crack_dir = appmod.CAPTURE_DIR / "crack"
+    crack_dir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(crack_dir / "test_crack.jpg"), np.zeros((10, 10, 3), dtype="uint8"))
+
+    resp = client.get("/data/captures/crack/test_crack.jpg")
+    assert resp.status_code == 200
+    assert resp.content_type == "image/jpeg"
+
+
+def test_stream_preview_route_does_not_exist(client):
+    """
+    /stream/preview.jpg (a full-frame annotated debug preview) has been
+    removed entirely - there must be no code path that ever exposes an
+    annotated full-frame image through the website.
+    """
+    import app as appmod
+
+    rules = [str(rule) for rule in appmod.app.url_map.iter_rules()]
+    assert not any("preview" in r for r in rules)
+
     resp = client.get("/stream/preview.jpg")
     assert resp.status_code == 404
 

@@ -31,6 +31,19 @@
   </section>
 
   <script>
+    // See static/dashboard.js's captureUrl() for why this keeps the
+    // "crack/<filename>" part rather than just the bare filename:
+    // captures now live under original/, crack/, and overlays/
+    // subfolders (see capture_manager.py).
+    function captureUrl(storedPath) {
+      if (!storedPath) return '';
+      const normalized = storedPath.replace(/\\/g, '/');
+      const marker = '/captures/';
+      const idx = normalized.lastIndexOf(marker);
+      const relative = idx >= 0 ? normalized.slice(idx + marker.length) : normalized.split('/').pop();
+      return '/data/captures/' + relative;
+    }
+
     async function loadInspections() {
       const body = document.getElementById('inspections-body');
       const emptyMsg = document.getElementById('inspections-empty');
@@ -49,7 +62,7 @@
             ? `${it.latitude.toFixed(5)}, ${it.longitude.toFixed(5)}`
             : 'Unavailable';
           const confPct = (it.confidence * 100).toFixed(1) + '%';
-          const imgUrl = '/data/captures/' + it.cropped_image_path.split('/').pop();
+          const imgUrl = captureUrl(it.cropped_image_path);
           return `
             <tr>
               <td>${it.id}</td>

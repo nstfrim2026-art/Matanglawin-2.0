@@ -36,7 +36,6 @@ from pathlib import Path
 
 from flask import (
     Flask,
-    Response,
     jsonify,
     render_template,
     request,
@@ -360,28 +359,6 @@ def report_full():
     except Exception as exc:  # noqa: BLE001
         return jsonify({"status": "error", "detail": f"PDF generation failed: {exc}"}), 500
     return send_file(str(out_path), mimetype="application/pdf", as_attachment=True)
-
-
-@app.route("/stream/preview.jpg", methods=["GET"])
-def stream_preview():
-    """
-    Latest annotated (overlay) frame from the live pipeline, as a single
-    JPEG. This is a lightweight fallback/debug preview - the production
-    "LIVE DRONE POV" on the dashboard consumes MediaMTX's own WebRTC
-    endpoint directly in the browser, not this route (see requirement
-    #6/#24 - inference stays server-side, video delivery stays on
-    MediaMTX's WebRTC output).
-    """
-    import cv2
-
-    pipeline = get_pipeline()
-    frame = pipeline.get_latest_overlay_jpeg()
-    if frame is None:
-        abort(404)
-    ok, buf = cv2.imencode(".jpg", frame)
-    if not ok:
-        abort(500)
-    return Response(buf.tobytes(), mimetype="image/jpeg")
 
 
 def _find_free_port(preferred: int, host: str = "127.0.0.1") -> int:

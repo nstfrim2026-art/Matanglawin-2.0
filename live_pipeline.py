@@ -22,6 +22,15 @@ single frame fails to process, the pipeline logs the error into its
 status and keeps running rather than taking the whole app down. A
 disconnected/offline drone is an expected, normal state, not a fatal
 error.
+
+Detection is invisible to the viewer: this loop never produces (or
+exposes) a full-frame annotated preview. The live "Drone POV" the user
+sees is the raw MediaMTX WebRTC feed, loaded directly in the browser
+(see templates/dashboard.html) - it is never touched by anything in
+this module. Only the small, per-instance, mask-based crack-only
+capture (and an internal-only red-mask diagnostic crop) are ever
+produced, by capture_manager.py, and only at the moment of a valid
+detection.
 """
 
 from __future__ import annotations
@@ -71,7 +80,6 @@ class LivePipeline:
         self._last_detection_at: Optional[float] = None
         self._last_capture_id: Optional[int] = None
         self._frames_processed = 0
-        self._latest_overlay = None
 
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -105,11 +113,6 @@ class LivePipeline:
                 last_capture_id=self._last_capture_id,
                 frames_processed=self._frames_processed,
             )
-
-    def get_latest_overlay_jpeg(self):
-        """Return the most recent annotated frame (BGR numpy array) or None."""
-        with self._lock:
-            return None if self._latest_overlay is None else self._latest_overlay.copy()
 
     # -- internals -------------------------------------------------------
 
@@ -145,14 +148,16 @@ class LivePipeline:
                 continue
 
             try:
-                result = detector.process_frame(frame, draw_overlay=True)
+                # process_frame() never produces a full-frame overlay -
+                # detection stays invisible to the viewer. Any red-mask
+                # visualization only ever happens later, per-instance,
+                # inside capture_manager.maybe_capture() (see detector.py).
+                result = detector.process_frame(frame)
                 capture_result = self.capture_manager.maybe_capture(frame, result)
 
                 with self._lock:
                     self._last_detection_at = time.time()
                     self._frames_processed += 1
-                    if result.overlay_frame is not None:
-                        self._latest_overlay = result.overlay_frame
                     if capture_result.saved:
                         self._last_capture_id = capture_result.inspection_id
             except Exception as exc:  # noqa: BLE001 - a single bad frame must not kill the loop
