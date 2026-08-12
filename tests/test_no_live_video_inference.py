@@ -21,6 +21,9 @@ RUNTIME_PY_FILES = [
     "inspection_db.py",
     "inspection_service.py",
     "photo_import.py",
+    "import_ledger.py",
+    "bridge_status.py",
+    "dji_photo_bridge.py",
 ]
 
 

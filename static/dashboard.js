@@ -90,6 +90,26 @@ async function refreshPovStatus() {
   }
 }
 
+// ------------------------------------------------- photo bridge status
+async function refreshBridgeStatus() {
+  const badge = document.getElementById('bridge-badge');
+  if (!badge) return;
+  let state = 'OFFLINE';
+  try {
+    const res = await fetch('/api/bridge/status');
+    const info = await res.json();
+    state = info.state || 'OFFLINE';
+  } catch (err) {
+    state = 'OFFLINE';
+  }
+  badge.textContent = 'PHOTO BRIDGE: ' + state;
+  badge.className = 'badge ' + (
+    state === 'READY' ? 'badge-live'
+      : state === 'OFFLINE' ? 'badge-offline'
+      : 'badge-connecting'  // WAITING FOR PHOTO
+  );
+}
+
 // -------------------------------------------------- latest inspection (B)
 function showToast(message) {
   const toast = document.getElementById('latest-toast');
@@ -159,6 +179,7 @@ async function refreshLatest() {
 function refreshAll() {
   refreshNetwork();
   refreshPovStatus();
+  refreshBridgeStatus();
   refreshLatest();
 }
 

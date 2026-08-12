@@ -12,11 +12,19 @@ TWO completely independent pipelines, exactly as required:
 
   Pipeline B - DJI STILL PHOTO INSPECTION (automatic):
       DJI Neo 2 -> operator presses PHOTO -> automatic transfer bridge
-      -> watch folder -> photo_import.PhotoImportWatcher
-      -> InspectionService -> best.pt/YOLO segmentation
+      -> MatanglaWIN -> InspectionService -> best.pt/YOLO segmentation
       -> CRACK DETECTED / NO CRACK DETECTED + original + red-highlighted
       -> automatic website update -> inspection history.
       No manual upload step and no Analyze button for DJI photos.
+
+      The original photo reaches MatanglaWIN by EITHER transport, both of
+      which feed the exact same InspectionService and are de-duplicated:
+        * a watch folder (photo_import.PhotoImportWatcher) - point any
+          folder-sync tool at MATANGLAWIN_IMPORT_DIR; or
+        * POST /api/import - the companion uploader (dji_photo_bridge.py)
+          pushes the original JPEG straight to the PC over the LAN.
+      A small PHOTO BRIDGE status (/api/bridge/status) reflects the
+      companion uploader's heartbeat.
 
 Both pipelines are independent: MediaMTX being down never blocks photo
 inspection, and a running inspection never interrupts the live POV.
@@ -43,6 +51,7 @@ Environment variables (optional):
                              (default: <data>/import)
 """
 
+import logging
 import os
 import sys
 import uuid
@@ -63,10 +72,15 @@ from flask import (
 from werkzeug.utils import secure_filename
 
 import network_config
+from bridge_status import BridgeStatus
+from import_ledger import ImportLedger, hash_bytes
 from inference_core import get_model
 from inspection_db import InspectionDB
 from inspection_service import InspectionService, InvalidImageError
 from photo_import import PhotoImportWatcher
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+log = logging.getLogger("matanglawin")
 
 # ---------------------------------------------------------------------------
 # Resource paths (read-only bundled files vs. writable runtime data).
@@ -80,15 +94,19 @@ else:
 
 DATA_DIR = APP_DIR / "matanglawin_data"
 UPLOAD_TMP_DIR = DATA_DIR / "upload_tmp"        # transient: incoming manual uploads
+IMPORT_TMP_DIR = DATA_DIR / "import_tmp"        # transient: incoming bridge (HTTP) photos
 INSPECTIONS_DIR = DATA_DIR / "inspections"      # per-inspection results (original/highlighted)
 IMPORT_DIR = Path(os.environ.get("MATANGLAWIN_IMPORT_DIR", str(DATA_DIR / "import")))
+IMPORT_LEDGER_PATH = DATA_DIR / "import_http_state.json"  # cross-restart de-dup for /api/import
 DB_PATH = DATA_DIR / "inspections.db"
-for d in (UPLOAD_TMP_DIR, INSPECTIONS_DIR, IMPORT_DIR):
+for d in (UPLOAD_TMP_DIR, IMPORT_TMP_DIR, INSPECTIONS_DIR, IMPORT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16 MB upload limit
+# Generous limit - a DJI Neo 2 full-resolution JPEG is only a few MB, but
+# leave headroom so an original is never rejected for size.
+MAX_CONTENT_LENGTH = 32 * 1024 * 1024  # 32 MB
 
 app = Flask(
     __name__,
@@ -110,7 +128,12 @@ def allowed_file(filename: str) -> bool:
 _db: InspectionDB = None
 _service: InspectionService = None
 _watcher: PhotoImportWatcher = None
+_import_ledger: ImportLedger = None
 _lock_obj = None
+
+# Liveness of the automatic photo-transfer bridge (companion uploader).
+# Cheap to construct, so it is a plain module-level singleton.
+bridge_status = BridgeStatus()
 
 
 def _get_lock():
@@ -146,6 +169,15 @@ def get_watcher() -> PhotoImportWatcher:
             if _watcher is None:
                 _watcher = PhotoImportWatcher(str(IMPORT_DIR), get_service())
     return _watcher
+
+
+def get_import_ledger() -> ImportLedger:
+    global _import_ledger
+    if _import_ledger is None:
+        with _get_lock():
+            if _import_ledger is None:
+                _import_ledger = ImportLedger(str(IMPORT_LEDGER_PATH))
+    return _import_ledger
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +316,94 @@ def api_inspect():
             pass
 
     return jsonify(_record_payload(record))
+
+
+# ---------------------------------------------------------------------------
+# Automatic DJI photo-transfer bridge endpoints.
+#
+# The bridge (dji_photo_bridge.py running on the phone/PC, or any folder-sync
+# tool paired with a re-poster) delivers the ACTUAL original DJI still here.
+# This is NOT a manual upload: no browser, no file picker, no Analyze button.
+# It converges on the exact same InspectionService as everything else, and
+# is de-duplicated by content hash so a retried upload is analyzed only once.
+# ---------------------------------------------------------------------------
+@app.route("/api/import", methods=["POST"])
+def api_import():
+    """Receive one original DJI photo from the transfer bridge and analyze it."""
+    bridge_status.record_contact()
+
+    # Accept either multipart ('image') or a raw image body (simplest for a
+    # lightweight uploader). Either way we keep the ORIGINAL bytes untouched.
+    filename = request.headers.get("X-Filename", "")
+    file = request.files.get("image")
+    if file is not None and file.filename != "":
+        filename = filename or file.filename
+        data = file.read()
+    else:
+        data = request.get_data(cache=False, as_text=False)
+
+    if not data:
+        return jsonify({"error": "no image data received"}), 400
+
+    digest = hash_bytes(data)
+    ledger = get_import_ledger()
+
+    # De-dup: a retried/duplicate transfer of the SAME photo is accepted
+    # (HTTP 200) but never analyzed a second time.
+    if ledger.seen(digest):
+        log.info("[PHOTO BRIDGE] Duplicate photo ignored (already analyzed): %s", filename or digest[:12])
+        return jsonify({"status": "duplicate", "message": "photo already analyzed", "sha256": digest}), 200
+
+    log.info("[PHOTO BRIDGE] New DJI photo received (%d bytes): %s", len(data), filename or "(unnamed)")
+
+    ext = Path(secure_filename(filename)).suffix.lower() if filename else ""
+    if ext not in ALLOWED_EXTS:
+        ext = ".jpg"
+    tmp_path = IMPORT_TMP_DIR / f"{uuid.uuid4().hex}{ext}"
+    try:
+        tmp_path.write_bytes(data)
+        log.info("[MATANGLAWIN] Inspection started")
+        record = get_service().analyze_file(str(tmp_path), source="import")
+    except InvalidImageError:
+        log.warning("[PHOTO BRIDGE] Rejected: not a readable image: %s", filename or digest[:12])
+        return jsonify({"error": "invalid or corrupt image"}), 400
+    except Exception as exc:  # noqa: BLE001
+        log.error("[PHOTO BRIDGE] Analysis failed: %s", exc)
+        return jsonify({"error": f"analysis failed: {exc}"}), 500
+    finally:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+
+    # Only mark as processed AFTER a successful analysis, so a transient
+    # failure doesn't permanently blacklist a photo the bridge will retry.
+    ledger.add(digest)
+    bridge_status.record_photo(status=record.status)
+    log.info("[MATANGLAWIN] %s (inspection #%s)", record.status, record.id)
+
+    payload = _record_payload(record)
+    payload["duplicate"] = False
+    # SHA-256 of the EXACT bytes received and fed to analysis. Not a model
+    # metric - a content-integrity/de-dup identity, and not shown in the UI.
+    # It lets a caller prove the analyzed image is the original photo it sent.
+    payload["sha256"] = digest
+    return jsonify(payload), 201
+
+
+@app.route("/api/bridge/ping", methods=["POST", "GET"])
+def api_bridge_ping():
+    """Lightweight heartbeat from the transfer bridge (keeps status READY)."""
+    bridge_status.record_contact()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/bridge/status", methods=["GET"])
+def api_bridge_status():
+    """Current PHOTO BRIDGE liveness for the dashboard indicator."""
+    snap = bridge_status.snapshot()
+    snap["import_dir"] = str(IMPORT_DIR)
+    return jsonify(snap)
 
 
 @app.route("/api/inspection/<int:inspection_id>", methods=["GET"])

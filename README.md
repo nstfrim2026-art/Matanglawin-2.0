@@ -77,32 +77,82 @@ height in the header). No other logo is generated or substituted.
 
 ## Automatic DJI photo inspection (Pipeline B)
 
-When the operator presses the shutter, the DJI Neo 2 saves a still photo.
-Transfer that photo to this PC's **import folder** and MatanglaWIN analyzes
-it automatically. There is no browse/select/drag/Upload/Analyze step.
+When the operator presses the shutter, the DJI Neo 2 saves the original
+still. MatanglaWIN then receives and analyzes that **exact original JPEG**
+automatically — no browse/select/drag/Upload/Analyze step, ever.
 
-Set the import folder (defaults to `matanglawin_data/import` next to the
-app):
+### Honest note on what DJI provides
+
+DJI Fly / the DJI Neo 2 do **not** expose a webhook or a documented local
+API that pushes a freshly captured photo into a third-party app. After the
+shutter, the original ends up in a phone/PC **album folder**. So the
+"phone → Windows" hop is completed by one of the two bridges below. Both
+deliver the original bytes and feed the **same** `InspectionService`; both
+are de-duplicated so a photo is analyzed only once.
+
+### Option 1 — Companion uploader (`dji_photo_bridge.py`) — direct LAN push
+
+A small stdlib-only watcher that monitors the DJI album folder and POSTs
+each new original to MatanglaWIN's `POST /api/import`. Run it on Android
+via **Termux** (watch the DJI album, target the PC's LAN address), or on
+the PC itself watching a folder that a sync app mirrors from the phone.
 
 ```
-MATANGLAWIN_IMPORT_DIR = C:\path\to\your\import\folder
+python dji_photo_bridge.py --server http://<PC-LAN-IP>:5000 --watch-dir "<DJI album folder>"
 ```
 
-Point your DJI-to-PC transfer at that folder. Any of these work — the
-watch folder reacts to files arriving regardless of the tool:
+Environment fallbacks: `MATANGLAWIN_BRIDGE_SERVER`,
+`MATANGLAWIN_BRIDGE_WATCH_DIR`, `MATANGLAWIN_BRIDGE_INTERVAL`. The PC address
+is **configured here, never hardcoded** — change Wi-Fi and just point
+`--server` at the PC's current LAN IP (shown on the dashboard). The uploader:
 
-- DJI Fly / DJI Assistant download destination,
-- a phone auto-sync (e.g. the album folder) synced to the PC,
-- USB/SD copy into the folder,
-- a cloud-drive folder that syncs to the PC.
+- waits until each file finishes downloading/copying (size stable),
+- uploads the **raw original bytes** (no quality loss, no re-encode),
+- **retries with backoff** when the PC is temporarily unavailable,
+- **never uploads the same photo twice** (SHA-256, persisted across restarts),
+- sends a heartbeat so the dashboard shows the bridge as connected,
+- requires no manual action after setup — you only press the shutter.
 
-The importer is **partial-copy safe** (waits until a file finishes
-copying), **de-duplicates** by content hash (the same photo is never
-analyzed twice, even after a restart), and **tolerates bad files** (a
-corrupt image is skipped without stopping the watcher).
+### Option 2 — Folder sync into the watch folder — zero extra code
 
-The dashboard's *Latest Inspection* panel updates on its own when a new
-photo is analyzed — no page refresh needed.
+Point any sync tool at the import folder MatanglaWIN already watches:
+
+```
+MATANGLAWIN_IMPORT_DIR = C:\path\to\your\import\folder   (default: matanglawin_data\import)
+```
+
+Then mirror the phone's DJI album into that folder with, e.g.:
+
+- **Syncthing** (LAN-only, no cloud — recommended), or
+- a cloud client (Google Photos/Drive, OneDrive, Dropbox), or
+- DJI Assistant / QuickTransfer download destination, or USB/SD copy.
+
+The watch-folder importer is **partial-copy safe**, **de-duplicates** by
+content hash (survives restarts), and **tolerates corrupt files** (skips
+them without stopping).
+
+> Prerequisite for both options: in DJI Fly, enable saving/downloading the
+> full-resolution **original** photo to the phone album (not just a cache
+> thumbnail), so a real original reaches the folder.
+
+Either way, the dashboard's *Latest Inspection* panel updates on its own —
+no page refresh, no Analyze button.
+
+### Photo bridge status + logging
+
+The dashboard shows a small **PHOTO BRIDGE** indicator (`READY` /
+`WAITING FOR PHOTO` / `OFFLINE`) driven by `GET /api/bridge/status` from the
+companion uploader's heartbeat. Both the app and the uploader log the flow:
+
+```
+[PHOTO BRIDGE] New DJI photo detected: DJI_0001.JPG
+[PHOTO BRIDGE] Upload complete
+[MATANGLAWIN] Inspection started
+[MATANGLAWIN] CRACK DETECTED (inspection #1)
+[PHOTO BRIDGE] PC unavailable - will retry     (on failure)
+```
+
+No technical metrics appear in the user-facing inspection result.
 
 ---
 
@@ -188,20 +238,71 @@ pytest -q
 ```
 
 Covers dynamic IP config + override, no hardcoded IPs, no live-video
-inference / no live YOLO, automatic photo ingestion, partial-copy safety,
-duplicate protection, invalid-file handling, original preservation,
-red-highlighted output, CRACK/NO-CRACK status, no confidence/box/crack-only
-in the user-facing output, manual-upload fallback, and the app routes.
+inference / no live YOLO, automatic photo ingestion (watch folder **and**
+`/api/import` bridge), partial-copy safety, duplicate protection across
+retries, invalid-file handling, original preservation, red-highlighted
+output, CRACK/NO-CRACK status, no confidence/box/crack-only in the
+user-facing output, bridge status transitions, manual-upload fallback, and
+the app routes.
+
+---
+
+## Real DJI Neo 2 hardware test
+
+Prove that pressing PHOTO makes the actual original arrive and appear in
+MatanglaWIN with **no manual upload**.
+
+1. Start MediaMTX (for the live POV) and `python app.py`. Note the PC's LAN
+   IP from the dashboard's *Live Feed Connection* panel.
+2. In DJI Fly, enable saving the full-resolution **original** photo to the
+   phone album, and configure the live-stream (RTMP) values shown on the
+   dashboard.
+3. Start the bridge:
+   - Companion uploader: `python dji_photo_bridge.py --server http://<PC-LAN-IP>:5000 --watch-dir "<DJI album>"` (Termux on the phone, or on the PC watching a synced folder), **or**
+   - Folder sync: point Syncthing/cloud at `MATANGLAWIN_IMPORT_DIR`.
+   Confirm the dashboard shows **PHOTO BRIDGE: READY / WAITING FOR PHOTO**.
+4. Connect the DJI Neo 2, open DJI Fly, confirm the **live POV** shows clean
+   video (no boxes/masks).
+5. **Isolation check:** stop MediaMTX so there is no live stream, aim at a
+   known crack, and press the **PHOTO/shutter button once**. Do not upload
+   or copy anything.
+6. Confirm, hands-off: the original lands in the watch folder / is POSTed,
+   the log shows `[MATANGLAWIN] Inspection started` then `CRACK DETECTED` /
+   `NO CRACK DETECTED`, and the dashboard's *Latest Inspection* updates by
+   itself with the original + red-highlighted image.
+7. **Prove it's the actual DJI still (not a stream frame):**
+   - The companion uploader's `POST /api/import` response includes a
+     `sha256` of the exact bytes sent. Compare it to the file on the phone/PC:
+     `certutil -hashfile "DJI_0001.JPG" SHA256` (Windows) — they must match.
+   - Confirm the stored original's resolution equals the DJI capture's
+     resolution, and its timestamp/filename correspond to your capture.
+   - Because MediaMTX was stopped in step 5, the result provably cannot have
+     come from the live stream.
+8. Restart MediaMTX; confirm the POV plays again, that merely streaming
+   creates **no** inspection, and that pressing PHOTO still produces one
+   while the POV keeps playing.
+9. Press PHOTO twice, and also re-copy an already-processed file: confirm
+   duplicates are **not** re-analyzed. Briefly stop the app mid-capture:
+   confirm the uploader retries and the photo still arrives once the app is
+   back.
+
+Automated stand-in for this flow (no drone needed): the test suite exercises
+the uploader → `/api/import` → analysis → status path, and a byte-identity
+check confirms the exact original bytes reach the analysis input.
 
 ---
 
 ## Files
 
-- `app.py` — Flask app: dashboard, result, inspections, manual-upload
-  fallback, and JSON/image APIs.
+- `app.py` — Flask app: dashboard, result, inspections, `/api/import`
+  bridge ingest, bridge status, manual-upload fallback, JSON/image APIs.
 - `inspection_service.py` — the single central analysis pipeline (manual +
   automatic converge here).
-- `photo_import.py` — automatic DJI photo watch-folder bridge.
+- `photo_import.py` — automatic DJI photo watch-folder bridge (Option 2).
+- `dji_photo_bridge.py` — companion uploader (Option 1): watch DJI album →
+  POST original to `/api/import`. Stdlib only; runs on Termux or the PC.
+- `import_ledger.py` — SHA-256 de-dup for `/api/import` (retry-safe).
+- `bridge_status.py` — PHOTO BRIDGE liveness (READY/WAITING/OFFLINE).
 - `detector.py` / `inference_core.py` — YOLO11-seg segmentation + red
   overlay drawing (shared, no duplication).
 - `inspection_db.py` — SQLite inspection history.

@@ -160,6 +160,7 @@ body {
 .panel-head h2 { margin: 0; font-size: 1.15rem; }
 
 .auto-note { color: var(--text-dim); font-size: 0.82rem; }
+.head-meta { display: flex; align-items: center; gap: 14px; }
 
 /* --------------------------------------------------- live drone POV (A) */
 .pov-panel { padding-bottom: 20px; }
