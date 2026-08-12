@@ -3,6 +3,21 @@ ultralytics>=8.3
 opencv-python-headless>=4.9
 numpy>=1.26
 werkzeug>=3.0
+reportlab>=4.0
+
+# reportlab - pure-Python PDF generation for inspection reports
+# (report_generator.py). No native/binary dependency, safe to bundle
+# into the PyInstaller executable like the rest of the app.
+#
+# NOTE: the live drone pipeline (video_source.py, detector.py,
+# capture_manager.py, live_pipeline.py) and network configuration
+# (network_config.py, gps_provider.py) only use the standard library
+# plus flask/opencv/numpy already listed above - no extra packages
+# required for those.
+
+# --- Development / test-only dependencies (not required to run the app) ---
+# pytest>=7.0
+# pytest-timeout>=2.2
 
 # NOTE: `ultralytics` depends on `torch`/`torchvision`. On a fresh install,
 # pip may pull the CUDA-enabled build of torch, which is several GB in size

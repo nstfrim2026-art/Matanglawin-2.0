@@ -27,10 +27,26 @@ datas = [
 # "matanglawin_data" folder next to the executable instead.
 
 datas += collect_data_files("ultralytics")
+datas += collect_data_files("reportlab")
 
 hiddenimports = []
 hiddenimports += collect_submodules("ultralytics")
 hiddenimports += collect_submodules("cv2")
+hiddenimports += collect_submodules("reportlab")
+# First-party modules - PyInstaller's static analysis normally finds
+# these via app.py's imports, but they're listed explicitly since some
+# import cv2/ultralytics lazily inside functions, which can confuse
+# dependency analysis.
+hiddenimports += [
+    "network_config",
+    "gps_provider",
+    "detector",
+    "inference_core",
+    "inspection_db",
+    "inspection_service",
+    "photo_import",
+    "report_generator",
+]
 
 a = Analysis(
     ["app.py"],
