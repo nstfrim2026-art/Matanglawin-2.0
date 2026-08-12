@@ -1,14 +1,14 @@
 # Running MATANGLAWIN where the camera is
 
-MATANGLAWIN reads a live camera feed directly on the server side (via
-OpenCV), then streams the annotated video to the browser. That means it
-must run **on or near the camera** — a public cloud host has no way to
-see a webcam sitting on your desk or a phone on your Wi-Fi network. This
-is a local/field monitoring tool, not a public demo website.
+MATANGLAWIN receives drone video via RTMP (through MediaMTX) and runs
+AI inference server-side. It then streams the annotated video to the
+browser. That means it must run **on the same machine as MediaMTX** or
+on a machine with network access to the camera source. This is a local/
+field monitoring tool, not a public demo website.
 
 There are two practical ways to run it:
 
-## Option A — Run directly on the operator's laptop (simplest)
+## Option A -- Run directly on the operator's laptop (simplest)
 
 This is the normal way to use it day-to-day.
 
@@ -20,28 +20,41 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open `http://localhost:5000` on that same laptop. The webcam source
-uses the laptop's built-in/USB camera. To use a phone or network camera
-instead, ensure it serves an MJPEG or RTSP stream accessible on the same
-Wi-Fi as the laptop, and set:
+Open `http://localhost:5000` on that same laptop.
+
+### DJI Neo 2 via MediaMTX (production workflow)
+
+1. Install and start MediaMTX on the same PC.
+2. Start MatanglaWIN (`python app.py`).
+3. Note the PC IP displayed in the Network Status panel.
+4. In DJI Fly, set RTMP address: `rtmp://<PC-IP>:1935` and stream key: `matanglawin`.
+5. Start the live stream from DJI Fly.
+
+The AI backend receives the stream from `rtsp://localhost:8554/matanglawin`
+and the browser receives the live POV from `http://localhost:8889/matanglawin`
+via WebRTC.
+
+### IP Camera or webcam
+
+To use a phone or network camera instead, set the IP camera URL:
 
 ```bash
 export IP_CAMERA_URL="http://<camera-ip>:4747/video"
 python app.py
 ```
 
-then select **IP Camera** in the dashboard's camera selector.
+Then select **IP Camera** in the dashboard.
 
-## Option B — One-click executable (no Python needed to run it)
+## Option B -- One-click executable (no Python needed to run it)
 
 Build once with `./build_exe.sh` (or `build_exe.bat` on Windows), then
 hand the resulting `dist/Matanglawin` (or `.exe`) file to the operator.
 They double-click it; no Python install required on their machine. See
 the main [README.md](README.md) for details.
 
-## Option C — Docker, on the same machine/network as the camera
+## Option C -- Docker, on the same machine/network as the camera
 
-Still local — Docker here is just for consistent deployment (e.g. onto
+Still local -- Docker here is just for consistent deployment (e.g. onto
 a small field PC or edge box that sits next to the drone ground station),
 not for public internet hosting.
 
@@ -51,18 +64,18 @@ docker run -p 5000:5000 --device=/dev/video0 matanglawin
 ```
 
 - `--device=/dev/video0` passes the host's local webcam into the
-  container (Linux only; omit it if you're only using a network camera
-  source like an IP camera or the future drone feed).
+  container (Linux only; omit it if you are only using a network camera
+  source or MediaMTX RTMP).
 - Open `http://localhost:5000` from a browser on that machine, or from
   another device on the same local network using the host machine's LAN
-  IP (e.g. `http://192.168.1.20:5000`).
+  IP (e.g. `http://<lan-ip>:5000`).
 
 ## Why not host it on Hugging Face Spaces / a public cloud server?
 
 A cloud server has no route to your webcam, your phone's IP camera
-stream, or a drone's local video downlink — those only exist on your
+stream, or a drone's local video downlink. Those only exist on your
 local network. Public hosting would only make sense if the app received
-video *from* the browser (e.g. WebRTC) instead of opening the camera
-itself server-side. That's a different architecture than what was
+video *from* the browser (e.g. WebRTC ingest) instead of opening the
+camera itself server-side. That is a different architecture than what was
 requested here (a continuous server-side OpenCV/YOLO pipeline), so for
 now this app is designed to run locally, next to the camera.

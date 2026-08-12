@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add/update integration tests for network config module (IP detection, manual override, dynamic RTMP generation, stream key config, /api/network endpoint). Update README.md with correct architecture documentation and hardware test procedure. Final audit for hardcoded IPs.",
+  "status": "in_progress",
+  "steps": [
+    "In tests/test_integration.py: Add test_network_config() function that tests: (a) import network_config succeeds, (b) detect_lan_ip() returns None or a valid IPv4 (not 127.x, not 169.254.x), (c) MATANGLAWIN_HOST_IP override works (set os.environ, call detect, verify returns the override, then clean up), (d) get_network_info() returns dict with all required keys (host_ip, rtmp_address, stream_key, rtsp_url, webrtc_url), (e) rtmp_address contains the detected host_ip, (f) stream_key defaults to 'matanglawin', (g) MATANGLAWIN_STREAM_KEY override works, (h) check_mediamtx_reachable() returns a dict/bool without crashing. Add test_api_network_endpoint() that verifies GET /api/network returns 200 with correct JSON structure.",
+    "In tests/test_integration.py: Add test_no_hardcoded_ips() that scans all .py files in the project root (excluding venv/, __pycache__/, .agents/) for patterns matching 192.168.x.x or 172.x.x.x in non-comment lines. This serves as a regression guard.",
+    "Update README.md: (a) Update the architecture description to reflect DJI NEO 2 -> DJI Fly -> RTMP -> MediaMTX -> RTSP (AI backend) + WebRTC (browser) flow. (b) Document env vars MATANGLAWIN_HOST_IP, MATANGLAWIN_STREAM_KEY, MEDIAMTX_RTSP_URL, MEDIAMTX_URL. (c) Remove outdated references to DRONE_URL env var. (d) Add a 'Hardware Test Procedure' section documenting how to test with actual DJI Neo 2 hardware (without claiming it has been tested). (e) Update the 'Camera sources' section to reflect current architecture (drone via MediaMTX RTMP, not direct URL). (f) Update the file listing to include network_config.py.",
+    "Update DEPLOY.md if needed to reflect MediaMTX-based architecture.",
+    "Register the new test functions in the main() function of test_integration.py so they run as part of the test suite."
+  ],
+  "acceptance_criteria": [
+    "test_network_config() passes all assertions",
+    "test_api_network_endpoint() passes",
+    "test_no_hardcoded_ips() passes (no hardcoded IPs in runtime .py files)",
+    "README.md documents the correct DJI Neo 2 -> RTMP -> MediaMTX architecture",
+    "README.md includes MATANGLAWIN_HOST_IP and MATANGLAWIN_STREAM_KEY env var documentation",
+    "README.md includes a Hardware Test Procedure section",
+    "All existing tests continue to pass",
+    "python tests/test_integration.py reports ALL INTEGRATION TESTS PASSED"
+  ],
+  "verification": [
+    "Run: python tests/test_integration.py and confirm ALL INTEGRATION TESTS PASSED",
+    "Run: grep -n 'MATANGLAWIN_HOST_IP\\|MATANGLAWIN_STREAM_KEY\\|Hardware Test' README.md and confirm documentation exists"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

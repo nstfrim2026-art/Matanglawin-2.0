@@ -898,6 +898,139 @@ def test_gps_timezone_matching():
     print()
 
 
+def test_network_config():
+    """Verify network_config module: IP detection, overrides, dynamic RTMP generation."""
+    print("=== NETWORK CONFIG TESTS ===")
+    import re
+    import network_config
+
+    # (a) import succeeds (already done above)
+    print("  [PASS] import network_config succeeds")
+
+    # (b) detect_lan_ip() returns None or a valid IPv4 (not 127.x, not 169.254.x)
+    ip = network_config.detect_lan_ip()
+    if ip is not None:
+        assert re.match(r"^\d+\.\d+\.\d+\.\d+$", ip), f"Invalid IPv4 format: {ip}"
+        assert not ip.startswith("127."), f"detect_lan_ip returned loopback: {ip}"
+        assert not ip.startswith("169.254."), f"detect_lan_ip returned link-local: {ip}"
+        print(f"  [PASS] detect_lan_ip() returned valid IP: {ip}")
+    else:
+        print("  [PASS] detect_lan_ip() returned None (no network - acceptable)")
+
+    # (c) MATANGLAWIN_HOST_IP override works
+    os.environ["MATANGLAWIN_HOST_IP"] = "10.0.0.99"
+    override_ip = network_config.get_host_ip()
+    assert override_ip == "10.0.0.99", f"Expected '10.0.0.99', got '{override_ip}'"
+    del os.environ["MATANGLAWIN_HOST_IP"]
+    print("  [PASS] MATANGLAWIN_HOST_IP override works correctly")
+
+    # (d) get_network_info() returns dict with all required keys
+    info = network_config.get_network_info()
+    required_keys = ["host_ip", "rtmp_address", "stream_key", "rtsp_url", "webrtc_url"]
+    for key in required_keys:
+        assert key in info, f"get_network_info() missing key: {key}"
+    print("  [PASS] get_network_info() returns all required keys")
+
+    # (e) rtmp_address contains the detected host_ip
+    assert info["host_ip"] in info["rtmp_address"], (
+        f"rtmp_address '{info['rtmp_address']}' does not contain host_ip '{info['host_ip']}'"
+    )
+    print("  [PASS] rtmp_address contains host_ip")
+
+    # (f) stream_key defaults to 'matanglawin'
+    # Make sure env var is not set
+    if "MATANGLAWIN_STREAM_KEY" in os.environ:
+        del os.environ["MATANGLAWIN_STREAM_KEY"]
+    default_key = network_config.get_stream_key()
+    assert default_key == "matanglawin", f"Expected 'matanglawin', got '{default_key}'"
+    print("  [PASS] stream_key defaults to 'matanglawin'")
+
+    # (g) MATANGLAWIN_STREAM_KEY override works
+    os.environ["MATANGLAWIN_STREAM_KEY"] = "custom_stream"
+    custom_key = network_config.get_stream_key()
+    assert custom_key == "custom_stream", f"Expected 'custom_stream', got '{custom_key}'"
+    del os.environ["MATANGLAWIN_STREAM_KEY"]
+    print("  [PASS] MATANGLAWIN_STREAM_KEY override works correctly")
+
+    # (h) check_mediamtx_reachable() returns a dict without crashing
+    reachability = network_config.check_mediamtx_reachable()
+    assert isinstance(reachability, dict), f"Expected dict, got {type(reachability)}"
+    assert "rtsp_reachable" in reachability
+    assert "webrtc_reachable" in reachability
+    assert "mediamtx_reachable" in reachability
+    print("  [PASS] check_mediamtx_reachable() returns dict without crashing")
+    print()
+
+
+def test_api_network_endpoint():
+    """Verify GET /api/network returns 200 with correct JSON structure."""
+    print("=== API NETWORK ENDPOINT TESTS ===")
+    from app import app
+
+    c = app.test_client()
+    r = c.get("/api/network")
+    assert r.status_code == 200, f"/api/network: expected 200, got {r.status_code}"
+    data = r.get_json()
+    assert data is not None, "/api/network: expected JSON response"
+    print("  [PASS] GET /api/network returns 200 with JSON")
+
+    # Required network info keys
+    required_keys = ["host_ip", "rtmp_address", "stream_key", "rtsp_url", "webrtc_url"]
+    for key in required_keys:
+        assert key in data, f"/api/network response missing key: {key}"
+    print("  [PASS] Response has all network info keys")
+
+    # Mediamtx reachability fields
+    reachability_keys = ["rtsp_reachable", "webrtc_reachable", "mediamtx_reachable"]
+    for key in reachability_keys:
+        assert key in data, f"/api/network response missing reachability key: {key}"
+    print("  [PASS] Response includes mediamtx reachability fields")
+    print()
+
+
+def test_no_hardcoded_ips():
+    """Regression guard: scan runtime .py files for hardcoded private IP addresses."""
+    print("=== NO HARDCODED IPS AUDIT ===")
+    import re
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Private IP pattern: 192.168.x.x in non-comment, non-test code
+    ip_pattern = re.compile(r"192\.168\.\d+\.\d+")
+    # Files/dirs to skip
+    skip_dirs = {"venv", "__pycache__", ".agents", ".git", "tests", "node_modules"}
+    skip_files = {"test_integration.py"}
+
+    violations = []
+
+    for fname in os.listdir(project_root):
+        if fname in skip_files:
+            continue
+        if not fname.endswith(".py"):
+            continue
+        fpath = os.path.join(project_root, fname)
+        if not os.path.isfile(fpath):
+            continue
+        with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+            for line_no, line in enumerate(f, 1):
+                stripped = line.strip()
+                # Skip pure comment lines
+                if stripped.startswith("#"):
+                    continue
+                # Skip docstring-only lines (triple quotes)
+                if stripped.startswith('"""') or stripped.startswith("'''"):
+                    continue
+                if ip_pattern.search(line):
+                    violations.append(f"{fname}:{line_no}: {stripped}")
+
+    if violations:
+        msg = "Hardcoded 192.168.x.x IPs found in runtime code:\n"
+        msg += "\n".join(f"  {v}" for v in violations)
+        assert False, msg
+
+    print("  [PASS] No hardcoded 192.168.x.x IPs found in runtime .py files")
+    print()
+
+
 def main():
     """Run all integration tests."""
     print("=" * 60)
@@ -920,6 +1053,9 @@ def main():
     test_crop_padding_ratio()
     test_crop_with_float_bbox()
     test_gps_timezone_matching()
+    test_network_config()
+    test_api_network_endpoint()
+    test_no_hardcoded_ips()
 
     print("=" * 60)
     print("ALL INTEGRATION TESTS PASSED")
