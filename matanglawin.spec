@@ -27,10 +27,27 @@ datas = [
 # "matanglawin_data" folder next to the executable instead.
 
 datas += collect_data_files("ultralytics")
+datas += collect_data_files("reportlab")
 
 hiddenimports = []
 hiddenimports += collect_submodules("ultralytics")
 hiddenimports += collect_submodules("cv2")
+hiddenimports += collect_submodules("reportlab")
+# Live drone pipeline modules - PyInstaller's static analysis normally
+# finds these automatically via app.py's top-level imports, but they're
+# listed explicitly since some (video_source, live_pipeline) only
+# import cv2 lazily inside functions, which can confuse dependency
+# analysis.
+hiddenimports += [
+    "network_config",
+    "gps_provider",
+    "detector",
+    "video_source",
+    "inspection_db",
+    "capture_manager",
+    "report_generator",
+    "live_pipeline",
+]
 
 a = Analysis(
     ["app.py"],

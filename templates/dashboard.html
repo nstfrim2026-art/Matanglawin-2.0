@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Matanglawin - Drone Inspection Dashboard{% endblock %}
+{% block content %}
+  <section class="hero">
+    <h1>Drone Inspection Dashboard</h1>
+    <p>Live DJI Neo 2 feed via MediaMTX WebRTC, automatic crack detection, and inspection capture.</p>
+  </section>
+
+  <section class="card panel">
+    <div class="panel-header">
+      <h2>Drone POV</h2>
+      <span id="stream-badge" class="badge badge-offline">OFFLINE</span>
+    </div>
+    <div class="pov-frame" id="pov-frame">
+      <div id="pov-placeholder" class="pov-placeholder">
+        <p>Waiting for drone stream&hellip;</p>
+        <p class="hint">The video below is served directly by MediaMTX over WebRTC - no OBS, VLC, or screen mirroring involved.</p>
+      </div>
+      <iframe id="pov-iframe" class="pov-iframe" title="Live drone POV" style="display:none;"></iframe>
+    </div>
+  </section>
+
+  <section class="card panel">
+    <h2>Crack Detection</h2>
+    <div class="kv-grid">
+      <div class="kv"><span class="kv-label">Detection status</span><span class="kv-value" id="detector-status">Unknown</span></div>
+      <div class="kv"><span class="kv-label">Frames processed</span><span class="kv-value" id="frames-processed">0</span></div>
+      <div class="kv"><span class="kv-label">Latest detection</span><span class="kv-value" id="last-detection-at">None yet</span></div>
+    </div>
+  </section>
+
+  <section class="card panel">
+    <h2>Latest Capture</h2>
+    <div class="latest-capture-grid">
+      <div>
+        <img id="latest-capture-img" class="result-img" alt="Latest captured crack" style="display:none;">
+        <p id="latest-capture-empty" class="hint">No crack captured yet.</p>
+      </div>
+      <div class="kv-grid">
+        <div class="kv"><span class="kv-label">Confidence</span><span class="kv-value" id="latest-confidence">&mdash;</span></div>
+        <div class="kv"><span class="kv-label">Timestamp</span><span class="kv-value" id="latest-timestamp">&mdash;</span></div>
+        <div class="kv"><span class="kv-label">GPS</span><span class="kv-value" id="latest-gps">Unavailable</span></div>
+      </div>
+      <a id="latest-report-link" class="btn-secondary" href="#" style="display:none;">Download PDF report</a>
+    </div>
+  </section>
+
+  <section class="card panel">
+    <h2>Network</h2>
+    <div class="kv-grid">
+      <div class="kv"><span class="kv-label">PC IP</span><span class="kv-value" id="net-host-ip">&mdash;</span></div>
+      <div class="kv"><span class="kv-label">DJI RTMP address</span><span class="kv-value" id="net-rtmp-address">&mdash;</span></div>
+      <div class="kv"><span class="kv-label">Stream key</span><span class="kv-value" id="net-stream-key">&mdash;</span></div>
+      <div class="kv"><span class="kv-label">RTSP source (AI pipeline)</span><span class="kv-value" id="net-rtsp-url">&mdash;</span></div>
+      <div class="kv"><span class="kv-label">WebRTC source (website)</span><span class="kv-value" id="net-webrtc-url">&mdash;</span></div>
+      <div class="kv"><span class="kv-label">MediaMTX reachable</span><span class="kv-value" id="net-mediamtx">&mdash;</span></div>
+    </div>
+    <p class="hint">
+      Configure DJI Fly with the RTMP address and stream key shown above. These values update
+      automatically if this PC's network changes - you never need to edit any source code.
+    </p>
+  </section>
+
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}

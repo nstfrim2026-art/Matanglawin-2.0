@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Matanglawin - Inspections{% endblock %}
+{% block content %}
+  <section class="hero">
+    <h1>Inspection History</h1>
+    <p>Every automatically-captured crack detection, with GPS (when available) and PDF reports.</p>
+  </section>
+
+  <section class="card panel">
+    <div class="panel-header">
+      <h2>Recorded Inspections</h2>
+      <a href="/reports/full.pdf" class="btn-primary">Download full PDF report</a>
+    </div>
+    <table class="inspections-table" id="inspections-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Timestamp</th>
+          <th>Image</th>
+          <th>Confidence</th>
+          <th>Instances</th>
+          <th>GPS</th>
+          <th>Report</th>
+        </tr>
+      </thead>
+      <tbody id="inspections-body">
+        <tr><td colspan="7" class="hint">Loading inspections&hellip;</td></tr>
+      </tbody>
+    </table>
+    <p id="inspections-empty" class="hint" style="display:none;">No inspections recorded yet.</p>
+  </section>
+
+  <script>
+    async function loadInspections() {
+      const body = document.getElementById('inspections-body');
+      const emptyMsg = document.getElementById('inspections-empty');
+      try {
+        const res = await fetch('/api/inspections?limit=200');
+        const data = await res.json();
+        const items = data.inspections || [];
+        if (items.length === 0) {
+          body.innerHTML = '';
+          emptyMsg.style.display = 'block';
+          return;
+        }
+        emptyMsg.style.display = 'none';
+        body.innerHTML = items.map((it) => {
+          const gps = it.gps_available
+            ? `${it.latitude.toFixed(5)}, ${it.longitude.toFixed(5)}`
+            : 'Unavailable';
+          const confPct = (it.confidence * 100).toFixed(1) + '%';
+          const imgUrl = '/data/captures/' + it.cropped_image_path.split('/').pop();
+          return `
+            <tr>
+              <td>${it.id}</td>
+              <td>${it.timestamp}</td>
+              <td><img src="${imgUrl}" alt="crack" class="thumb"></td>
+              <td>${confPct}</td>
+              <td>${it.num_instances}</td>
+              <td>${gps}</td>
+              <td><a href="/reports/inspection/${it.id}.pdf" class="btn-secondary btn-small">PDF</a></td>
+            </tr>`;
+        }).join('');
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="7" class="hint">Failed to load inspections: ${err}</td></tr>`;
+      }
+    }
+
+    loadInspections();
+    setInterval(loadInspections, 5000);
+  </script>
+{% endblock %}
