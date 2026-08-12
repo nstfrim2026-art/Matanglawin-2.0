@@ -461,7 +461,8 @@ class CaptureManager:
             crop_path = None
             try:
                 bbox = primary["bbox"]  # [x1, y1, x2, y2]
-                x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+                # Cast to int - YOLO bbox coords are floats; numpy rejects float slice indices
+                x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                 bbox_w = x2 - x1
                 bbox_h = y2 - y1
 
@@ -483,6 +484,7 @@ class CaptureManager:
                     crop_path = os.path.join(self._crops_dir, crop_filename)
                     cv2.imwrite(crop_path, cropped, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             except Exception:
+                logger.warning("Crop failed for %s", capture_id, exc_info=True)
                 crop_path = None
 
             # Get GPS position for this capture

@@ -187,6 +187,9 @@
 
     cameraWasConnected = cameraConnected;
 
+    // Drive stream overlay from backend camera_connected flag
+    updateStreamOverlayFromStatus(cameraConnected);
+
     // Live indicator
     if (liveDot) {
       if (cameraConnected) {
@@ -388,11 +391,12 @@
     if (!droneStream) return;
 
     droneStream.addEventListener("load", function () {
-      _streamConnected = true;
-      if (streamDisconnected) streamDisconnected.style.display = "none";
-      if (_streamRetryTimer) {
-        clearInterval(_streamRetryTimer);
-        _streamRetryTimer = null;
+      // Note: cross-origin iframe load events are unreliable.
+      // We rely primarily on /status camera_connected flag (polled in pollStatus).
+      // The load event is only used as a secondary signal.
+      if (cameraWasConnected) {
+        _streamConnected = true;
+        if (streamDisconnected) streamDisconnected.style.display = "none";
       }
     });
 
@@ -414,6 +418,20 @@
         showStreamDisconnected();
       }
     }, STREAM_RETRY_MS);
+  }
+
+  function updateStreamOverlayFromStatus(cameraConnected) {
+    // Primary stream connectivity driven by backend /status camera_connected flag
+    if (cameraConnected) {
+      _streamConnected = true;
+      if (streamDisconnected) streamDisconnected.style.display = "none";
+      if (_streamRetryTimer) {
+        clearInterval(_streamRetryTimer);
+        _streamRetryTimer = null;
+      }
+    } else {
+      showStreamDisconnected();
+    }
   }
 
   function showStreamDisconnected() {

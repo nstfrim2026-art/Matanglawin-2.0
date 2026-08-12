@@ -13,7 +13,7 @@ GPS data is primarily a report/export feature, not a live dashboard feature.
 from __future__ import annotations
 
 import bisect
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 
@@ -180,8 +180,8 @@ class GPSProvider:
 
         Accepts:
           - float/int (treated as epoch seconds)
-          - datetime object
-          - ISO 8601 string (with or without timezone)
+          - datetime object (timezone-aware treated as-is; naive treated as UTC)
+          - ISO 8601 string (with or without timezone; naive assumed UTC)
 
         Returns:
             Epoch seconds as float, or None if parsing fails.
@@ -190,28 +190,35 @@ class GPSProvider:
             return float(ts)
 
         if isinstance(ts, datetime):
+            # If naive (no tzinfo), assume UTC to match capture timestamps
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
             return ts.timestamp()
 
         if isinstance(ts, str):
-            # Try common ISO formats
+            # Try with timezone info using fromisoformat first (Python 3.7+)
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                # fromisoformat preserves timezone; if parsed as naive, assume UTC
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.timestamp()
+            except (ValueError, AttributeError):
+                pass
+
+            # Fall back to strptime for common ISO formats
             for fmt in (
                 "%Y-%m-%dT%H:%M:%S.%f",
                 "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S.%fZ",
-                "%Y-%m-%dT%H:%M:%SZ",
                 "%Y-%m-%d %H:%M:%S.%f",
                 "%Y-%m-%d %H:%M:%S",
             ):
                 try:
                     dt = datetime.strptime(ts, fmt)
+                    # strptime produces naive datetimes; assume UTC
+                    dt = dt.replace(tzinfo=timezone.utc)
                     return dt.timestamp()
                 except ValueError:
                     continue
-            # Try with timezone info using fromisoformat (Python 3.7+)
-            try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                return dt.timestamp()
-            except (ValueError, AttributeError):
-                pass
 
         return None
