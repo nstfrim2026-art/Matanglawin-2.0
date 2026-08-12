@@ -1,12 +1,15 @@
 /**
- * dashboard.js - Polls the backend for network config, stream status, and
- * the latest capture, and updates the dashboard UI accordingly.
+ * dashboard.js - Drives the display-only dashboard.
  *
- * The live drone POV video itself is loaded directly from MediaMTX's own
- * WebRTC endpoint (network.webrtc_url) inside an <iframe> - the Flask
- * backend never proxies or re-encodes the video stream. This keeps the
- * "no OBS / no screen mirroring / video comes straight from MediaMTX"
- * requirement true at the browser level, not just on paper.
+ * Two independent concerns, matching the backend split:
+ *   1. Live Drone POV  - the raw MediaMTX WebRTC feed, loaded directly
+ *      into an <iframe>. The backend never proxies/re-encodes/annotates
+ *      it, and NO detection runs on it. A LIVE/OFFLINE/UNKNOWN badge is
+ *      derived from MediaMTX's own publisher state (/api/stream/status),
+ *      which does not run YOLO.
+ *   2. Latest Inspection - the most recent PHOTO analysis result
+ *      (/api/inspection/latest): status + original/highlighted/crack
+ *      images. Never shows confidence.
  */
 
 const REFRESH_INTERVAL_MS = 3000;
@@ -17,34 +20,13 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
-/**
- * Build the /data/captures/... URL for a stored capture path.
- *
- * `cropped_image_path` is an absolute filesystem path such as
- * ".../matanglawin_data/captures/crack/crack_20260812_101500.jpg" -
- * captures now live under original/, crack/, and overlays/
- * subfolders (see capture_manager.py), so we must keep the
- * "crack/<filename>" part, not just the bare filename, or the image
- * 404s against the flat /data/captures/<filename> route.
- */
-function captureUrl(storedPath) {
-  if (!storedPath) return '';
-  const normalized = storedPath.replace(/\\/g, '/');
-  const marker = '/captures/';
-  const idx = normalized.lastIndexOf(marker);
-  const relative = idx >= 0 ? normalized.slice(idx + marker.length) : normalized.split('/').pop();
-  return '/data/captures/' + relative;
-}
-
 async function refreshNetwork() {
   try {
     const res = await fetch('/api/network');
     const info = await res.json();
-
     setText('net-host-ip', info.host_ip || 'Unavailable (no network detected)');
     setText('net-rtmp-address', info.rtmp_address || 'Unavailable - connect to a network first');
     setText('net-stream-key', info.stream_key || '\u2014');
-    setText('net-rtsp-url', info.rtsp_url || '\u2014');
     setText('net-webrtc-url', info.webrtc_url || '\u2014');
 
     if (info.webrtc_url && info.webrtc_url !== lastWebrtcUrl) {
@@ -65,7 +47,7 @@ async function refreshNetwork() {
   }
 }
 
-function setStreamBadge(state) {
+function setPovBadge(state) {
   const badge = document.getElementById('stream-badge');
   const placeholder = document.getElementById('pov-placeholder');
   const iframe = document.getElementById('pov-iframe');
@@ -73,76 +55,95 @@ function setStreamBadge(state) {
 
   badge.textContent = state;
   badge.className = 'badge ' + (
-    state === 'LIVE' ? 'badge-live' : state === 'CONNECTING' ? 'badge-connecting' : 'badge-offline'
+    state === 'LIVE' ? 'badge-live' : state === 'OFFLINE' ? 'badge-offline' : 'badge-connecting'
   );
 
-  if (state === 'LIVE') {
-    if (placeholder) placeholder.style.display = 'none';
-    if (iframe) iframe.style.display = 'block';
-  } else {
-    if (placeholder) placeholder.style.display = 'block';
-    if (iframe) iframe.style.display = 'none';
-  }
+  // Show the WebRTC player whenever we have a URL; the badge just
+  // annotates whether a publisher is currently detected. When the
+  // MediaMTX API isn't reachable (UNKNOWN) we still show the feed.
+  const showFeed = state === 'LIVE' || state === 'UNKNOWN';
+  if (placeholder) placeholder.style.display = showFeed ? 'none' : 'block';
+  if (iframe) iframe.style.display = showFeed ? 'block' : 'none';
 }
 
-async function refreshStreamStatus() {
+async function refreshPovStatus() {
   try {
     const res = await fetch('/api/stream/status');
     const status = await res.json();
-    setStreamBadge(status.stream_state || 'OFFLINE');
-    setText('detector-status', status.detector_ready ? 'Ready' : (status.detector_error || 'Loading model...'));
-    setText('frames-processed', String(status.frames_processed || 0));
-    setText(
-      'last-detection-at',
-      status.last_detection_at
-        ? new Date(status.last_detection_at * 1000).toLocaleTimeString()
-        : 'None yet'
-    );
+    setPovBadge(status.pov_state || 'UNKNOWN');
   } catch (err) {
-    setStreamBadge('OFFLINE');
+    setPovBadge('UNKNOWN');
   }
 }
 
-async function refreshLatestCapture() {
+function renderLatest(rec) {
+  const empty = document.getElementById('latest-empty');
+  const content = document.getElementById('latest-content');
+  if (!rec) {
+    if (empty) empty.style.display = 'block';
+    if (content) content.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (content) content.style.display = 'block';
+
+  const banner = document.getElementById('latest-status');
+  if (banner) {
+    banner.textContent = rec.status;
+    banner.className = 'status-banner ' + (rec.has_crack ? 'status-crack' : 'status-ok');
+  }
+  setText('latest-timestamp', rec.timestamp);
+  setText('latest-source', rec.source === 'import' ? 'DJI import' : 'Manual upload');
+  setText(
+    'latest-gps',
+    rec.gps_available ? `${rec.latitude.toFixed(5)}, ${rec.longitude.toFixed(5)}` : 'Unavailable'
+  );
+
+  const urls = rec.urls || {};
+  const original = document.getElementById('latest-original');
+  if (original && urls.original) original.src = urls.original;
+
+  const hlCol = document.getElementById('latest-highlighted-col');
+  const hl = document.getElementById('latest-highlighted');
+  if (rec.has_crack && urls.highlighted) {
+    if (hl) hl.src = urls.highlighted;
+    if (hlCol) hlCol.style.display = 'block';
+  } else if (hlCol) {
+    hlCol.style.display = 'none';
+  }
+
+  const cracksCol = document.getElementById('latest-cracks-col');
+  const cracks = document.getElementById('latest-cracks');
+  if (rec.has_crack && urls.cracks && urls.cracks.length) {
+    if (cracks) {
+      cracks.innerHTML = urls.cracks
+        .map((u, i) => `<div class="crack-item"><img src="${u}" class="crack-img" alt="Crack ${i + 1}"><span class="hint">Crack #${i + 1}</span></div>`)
+        .join('');
+    }
+    if (cracksCol) cracksCol.style.display = 'block';
+  } else if (cracksCol) {
+    cracksCol.style.display = 'none';
+  }
+
+  const view = document.getElementById('latest-view');
+  if (view) view.href = `/inspection/${rec.id}`;
+  const report = document.getElementById('latest-report');
+  if (report) report.href = `/reports/inspection/${rec.id}.pdf`;
+}
+
+async function refreshLatest() {
   try {
-    const res = await fetch('/api/inspections/latest');
-    const rec = await res.json();
-    const img = document.getElementById('latest-capture-img');
-    const empty = document.getElementById('latest-capture-empty');
-    const reportLink = document.getElementById('latest-report-link');
-
-    if (!rec) {
-      if (img) img.style.display = 'none';
-      if (empty) empty.style.display = 'block';
-      if (reportLink) reportLink.style.display = 'none';
-      return;
-    }
-
-    if (empty) empty.style.display = 'none';
-    if (img) {
-      img.src = captureUrl(rec.cropped_image_path);
-      img.style.display = 'block';
-    }
-    setText('latest-confidence', (rec.confidence * 100).toFixed(1) + '%');
-    setText('latest-timestamp', rec.timestamp);
-    setText(
-      'latest-gps',
-      rec.gps_available ? `${rec.latitude.toFixed(5)}, ${rec.longitude.toFixed(5)}` : 'Unavailable'
-    );
-    if (reportLink) {
-      reportLink.href = `/reports/inspection/${rec.id}.pdf`;
-      reportLink.style.display = 'inline-block';
-    }
+    const res = await fetch('/api/inspection/latest');
+    renderLatest(await res.json());
   } catch (err) {
-    // Leave the last known values on screen; this is expected while the
-    // drone/backend is offline.
+    /* leave last known result on screen */
   }
 }
 
 function refreshAll() {
   refreshNetwork();
-  refreshStreamStatus();
-  refreshLatestCapture();
+  refreshPovStatus();
+  refreshLatest();
 }
 
 refreshAll();

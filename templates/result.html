@@ -1,32 +1,56 @@
 {% extends "base.html" %}
-{% block title %}Matanglawin - Detection Result{% endblock %}
+{% block title %}Matanglawin - Inspection Result{% endblock %}
 {% block content %}
   <section class="hero">
-    <h1>
-      {% if num_instances > 0 %}
-        Found {{ num_instances }} crack instance{{ 's' if num_instances != 1 else '' }}
-      {% else %}
-        No cracks detected
-      {% endif %}
-    </h1>
-    <p class="hint">
-      Confidence &ge; {{ conf }} &middot; Mask opacity {{ alpha }} &middot; Outline {{ outline }}px
-    </p>
+    <h1>Inspection Result</h1>
   </section>
 
-  <section class="card result-grid">
-    <div class="result-col">
-      <h3>Original</h3>
-      <img src="{{ original_url }}" alt="Original image" class="result-img">
+  <section class="card panel">
+    <div class="status-banner {{ 'status-crack' if has_crack else 'status-ok' }}">
+      {{ status }}
     </div>
-    <div class="result-col">
-      <h3>Detected cracks</h3>
-      <img src="{{ result_url }}" alt="Overlay result" class="result-img">
+    <div class="kv-grid">
+      <div class="kv"><span class="kv-label">Timestamp</span><span class="kv-value">{{ timestamp }}</span></div>
+      <div class="kv"><span class="kv-label">Source</span><span class="kv-value">{{ 'DJI import' if source == 'import' else 'Manual upload' }}</span></div>
+      {% if has_crack %}
+      <div class="kv"><span class="kv-label">Cracks detected</span><span class="kv-value">{{ num_instances }}</span></div>
+      {% endif %}
+      <div class="kv"><span class="kv-label">GPS</span>
+        <span class="kv-value">
+          {% if gps_available %}{{ '%.5f'|format(latitude) }}, {{ '%.5f'|format(longitude) }}{% else %}Unavailable{% endif %}
+        </span>
+      </div>
     </div>
   </section>
+
+  <section class="card panel">
+    <h2>Original Photo</h2>
+    <img src="{{ original_url }}" alt="Original photo" class="result-img">
+  </section>
+
+  {% if has_crack %}
+  <section class="card panel">
+    <h2>Crack Highlighted</h2>
+    <p class="hint">The captured photo with every detected crack highlighted in red.</p>
+    <img src="{{ highlighted_url }}" alt="Crack highlighted" class="result-img">
+  </section>
+
+  <section class="card panel">
+    <h2>Crack Only</h2>
+    <p class="hint">Each detected crack isolated using its segmentation mask (background removed).</p>
+    <div class="crack-grid">
+      {% for crack_url in crack_urls %}
+        <div class="crack-item">
+          <img src="{{ crack_url }}" alt="Crack {{ loop.index }}" class="crack-img">
+          <span class="hint">Crack #{{ loop.index }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 
   <div class="actions">
-    <a href="{{ result_url }}" download class="btn-secondary">Download result</a>
-    <a href="{{ url_for('index') }}" class="btn-primary">Analyze another image</a>
+    <a href="/reports/inspection/{{ inspection_id }}.pdf" class="btn-secondary">Download PDF report</a>
+    <a href="{{ url_for('index') }}" class="btn-primary">Inspect another photo</a>
   </div>
 {% endblock %}

@@ -207,3 +207,23 @@ def test_crack_overlay_crop_preserves_background_and_is_small():
     assert overlay.shape[1] < frame.shape[1]
     nonblack_fraction = (overlay.sum(axis=2) > 0).mean()
     assert nonblack_fraction > 0.9  # background preserved, unlike extract_crack_only
+
+
+def test_build_union_mask_covers_every_instance():
+    """
+    The full-image red-highlight relies on build_union_mask reassembling
+    every instance's bbox-aligned mask back into a single frame-sized mask.
+    """
+    from detector import CrackInstance
+
+    m1 = np.ones((10, 10), dtype=np.uint8)
+    m2 = np.ones((20, 20), dtype=np.uint8)
+    insts = [
+        CrackInstance(0.9, (5, 5, 15, 15), 100, m1),
+        CrackInstance(0.8, (50, 50, 70, 70), 400, m2),
+    ]
+    union = detector.build_union_mask(insts, (100, 100))
+    assert union.shape == (100, 100)
+    assert int(union.sum()) == 100 + 400
+    assert int(union[5:15, 5:15].sum()) == 100
+    assert int(union[50:70, 50:70].sum()) == 400

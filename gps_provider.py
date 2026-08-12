@@ -2,9 +2,9 @@
 gps_provider.py - Optional GPS/location association for inspection events.
 
 Matanglawin does NOT require a dedicated GPS module to function. GPS is
-purely supplementary metadata attached to a captured crack inspection
-record (see capture_manager.py / inspection_db.py) - detection keeps
-working with or without it.
+purely supplementary metadata attached to an inspection record (see
+inspection_service.py / inspection_db.py) - detection keeps working with
+or without it.
 
 We NEVER fabricate coordinates. If no real source is available, every
 function here returns `None` values and callers must render/store that
@@ -60,7 +60,7 @@ def set_gps_source(source: Optional[Callable[[], Optional[GpsFix]]]) -> None:
     """
     Register (or clear, with None) a callable that returns the current
     GpsFix on demand. Intended for a future real GPS/telemetry feed to
-    plug into without touching capture_manager.py or inspection_db.py.
+    plug into without touching inspection_service.py or inspection_db.py.
     """
     global _gps_source
     _gps_source = source

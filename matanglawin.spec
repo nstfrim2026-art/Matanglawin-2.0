@@ -33,20 +33,19 @@ hiddenimports = []
 hiddenimports += collect_submodules("ultralytics")
 hiddenimports += collect_submodules("cv2")
 hiddenimports += collect_submodules("reportlab")
-# Live drone pipeline modules - PyInstaller's static analysis normally
-# finds these automatically via app.py's top-level imports, but they're
-# listed explicitly since some (video_source, live_pipeline) only
-# import cv2 lazily inside functions, which can confuse dependency
-# analysis.
+# First-party modules - PyInstaller's static analysis normally finds
+# these via app.py's imports, but they're listed explicitly since some
+# import cv2/ultralytics lazily inside functions, which can confuse
+# dependency analysis.
 hiddenimports += [
     "network_config",
     "gps_provider",
     "detector",
-    "video_source",
+    "inference_core",
     "inspection_db",
-    "capture_manager",
+    "inspection_service",
+    "photo_import",
     "report_generator",
-    "live_pipeline",
 ]
 
 a = Analysis(

@@ -47,6 +47,7 @@ DEFAULT_STREAM_KEY = "matanglawin"
 DEFAULT_RTMP_PORT = 1935
 DEFAULT_RTSP_PORT = 8554
 DEFAULT_WEBRTC_PORT = 8889
+DEFAULT_API_PORT = 9997  # MediaMTX's HTTP control API (enabled by default in MediaMTX)
 
 # Addresses that are never a usable "another device on the LAN can reach
 # me here" address.
@@ -135,6 +136,7 @@ class NetworkInfo:
     rtmp_port: int
     rtsp_port: int
     webrtc_port: int
+    api_port: int
     rtmp_address: Optional[str]   # rtmp://<host_ip>:<rtmp_port>  (no path - this is what DJI Fly expects)
     rtmp_url: Optional[str]       # rtmp://<host_ip>:<rtmp_port>/<stream_key>  (full publish URL)
     rtsp_url: str                 # rtsp://localhost:<rtsp_port>/<stream_key>  (always localhost)
@@ -168,6 +170,7 @@ def get_network_info() -> NetworkInfo:
     rtmp_port = _int_env("MATANGLAWIN_RTMP_PORT", DEFAULT_RTMP_PORT)
     rtsp_port = _int_env("MATANGLAWIN_RTSP_PORT", DEFAULT_RTSP_PORT)
     webrtc_port = _int_env("MATANGLAWIN_WEBRTC_PORT", DEFAULT_WEBRTC_PORT)
+    api_port = _int_env("MATANGLAWIN_API_PORT", DEFAULT_API_PORT)
 
     env_ip = os.environ.get("MATANGLAWIN_HOST_IP", "").strip()
     host_ip: Optional[str]
@@ -208,6 +211,7 @@ def get_network_info() -> NetworkInfo:
         rtmp_port=rtmp_port,
         rtsp_port=rtsp_port,
         webrtc_port=webrtc_port,
+        api_port=api_port,
         rtmp_address=rtmp_address,
         rtmp_url=rtmp_url,
         rtsp_url=rtsp_url,
@@ -246,3 +250,46 @@ def get_mediamtx_status(info: Optional[NetworkInfo] = None, timeout: float = 0.3
         "webrtc_reachable": webrtc_ok,
         "reachable": rtmp_ok and rtsp_ok and webrtc_ok,
     }
+
+
+# Publisher-state values reported for the display-only POV.
+POV_LIVE = "LIVE"        # a publisher (the drone) is connected and the path is ready
+POV_OFFLINE = "OFFLINE"  # MediaMTX API reachable, but no publisher on the path
+POV_UNKNOWN = "UNKNOWN"  # MediaMTX API not reachable / not enabled - can't tell
+
+
+def get_stream_status(info: Optional[NetworkInfo] = None, timeout: float = 0.4) -> dict:
+    """
+    Best-effort, DISPLAY-ONLY check of whether the drone is currently
+    publishing to MediaMTX, by querying MediaMTX's own HTTP control API
+    (`/v3/paths/get/<stream_key>`, default port 9997).
+
+    This does NOT run YOLO, open the RTSP stream, or read any frames -
+    it only asks MediaMTX whether the path has an active publisher, so
+    the dashboard can show a LIVE/OFFLINE badge next to the (separately
+    served) WebRTC POV. If MediaMTX's API isn't reachable/enabled, we
+    return UNKNOWN and the UI simply shows the raw feed without a
+    definitive badge - never an error.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    info = info or get_network_info()
+    url = f"http://localhost:{info.api_port}/v3/paths/get/{info.stream_key}"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            if resp.status == 404:
+                # API up, but the path doesn't exist yet -> no publisher.
+                return {"pov_state": POV_OFFLINE, "api_reachable": True}
+            data = _json.loads(resp.read().decode("utf-8"))
+        ready = bool(data.get("ready", False))
+        return {"pov_state": POV_LIVE if ready else POV_OFFLINE, "api_reachable": True}
+    except urllib.error.HTTPError as exc:  # noqa: PERF203
+        # 404 => path not created yet (no publisher). Any other HTTP
+        # error still means the API is reachable.
+        if exc.code == 404:
+            return {"pov_state": POV_OFFLINE, "api_reachable": True}
+        return {"pov_state": POV_OFFLINE, "api_reachable": True}
+    except Exception:  # noqa: BLE001 - API disabled/unreachable/timeout
+        return {"pov_state": POV_UNKNOWN, "api_reachable": False}

@@ -1,378 +1,324 @@
 # Matanglawin-2.0
-Second Version
 
-## Web App
+Photo-based crack inspection with a display-only live drone POV.
 
-A Flask website (`app.py`) with two complementary workflows:
+## What it does
 
-1. **Upload Photo** (`/`) - upload a single photo of a surface (road,
-   wall, pipe, etc.) and see the trained YOLO11-seg model (`best.pt`)
-   highlight every crack it detects, using the same overlay logic as
-   `infer_overlay.py` (exact mask contour, no bounding boxes), shared via
-   `inference_core.py`.
-2. **Live Drone Dashboard** (`/dashboard`) - the DJI Neo 2 workflow:
-   DJI Fly publishes an RTMP stream to a locally-running **MediaMTX**
-   instance, which serves it back out as RTSP (for the AI pipeline) and
-   WebRTC (for the website's live "Drone POV"). The backend continuously
-   pulls frames from the RTSP stream, runs the same YOLO11-seg model on
-   each frame, and automatically captures a cropped image + GPS (when
-   available) + timestamp for every valid crack detection into a local
-   database, from which PDF inspection reports can be generated
-   (`/inspections`).
+MatanglaWIN analyzes **still photos** for surface cracks using a trained
+YOLO11-seg model (`best.pt`). For each photo it reports **CRACK
+DETECTED** or **NO CRACK DETECTED**, produces a red-highlighted copy of
+the photo, and isolates each crack using its segmentation mask.
 
-Both workflows share the same trained model and the same underlying
-mask-overlay drawing code - nothing about the model or its weights was
-changed to add the live pipeline.
+There are two ways a photo reaches the analyzer, and both go through the
+**one** central pipeline (`inspection_service.py`):
 
-**The live "Drone POV" is always a clean, unannotated video feed.**
-Detection runs entirely server-side and is invisible to the viewer:
-there is no red mask, no bounding box, no label, and no confidence
-score drawn on the live stream, ever. The only place a red
-segmentation-mask visualization is produced is internally, at the
-moment of an automatic capture, on a small crop around that one crack
-instance - never on the live feed, and never exposed through any
-Flask route (see "Automatic capture" below).
+1. **Manual upload** (`/`) - upload a photo in the browser (or POST to
+   `/api/inspect`).
+2. **DJI photo import** - the DJI Neo 2 controller takes a photo; the
+   photo is transferred to this PC's watch folder; MatanglaWIN detects
+   it and analyzes it automatically.
 
-### Live drone architecture
+Separately, the dashboard (`/dashboard`) shows the **live drone POV** -
+purely for viewing. That video is the raw MediaMTX WebRTC feed embedded
+in the browser. **No AI runs on the live video**: no continuous
+inference, no red masks, no boxes, no automatic frame capture. The user
+watches the feed and decides when to take a photo with the controller.
 
 ```
-DJI Neo 2
-    |  DJI Fly
-    |  RTMP  (rtmp://<this PC's LAN IP>:1935/matanglawin)
-    v
-MediaMTX
-    |-----------------------------|
-    v                             v
-RTSP (rtsp://localhost:8554/...)  WebRTC (http://localhost:8889/...)
-    |                             |
-    v                             v
-YOLO11-seg (detector.py)     MatanglaWIN website <dashboard>
-    |                        (LIVE DRONE POV - raw MediaMTX WebRTC
-    v                         feed, completely clean: no OBS, no VLC,
-Crack detection (detector.py)  no LetsView, no screen-mirroring, and
-    |                          NO detection overlay of any kind)
-    v
-Automatic capture (capture_manager.py) - happens invisibly, server-side
-    |-- captures/original/  - full captured frame (evidence only)
-    |-- captures/crack/     - crack-ONLY image, extracted using the
-    |                         actual YOLO segmentation mask (not a
-    |                         bounding box) - this is what the
-    |                         dashboard's "Latest Capture" panel and
-    |                         PDF reports show, completely separate
-    |                         from the live POV above
-    |-- captures/overlays/  - small, internal-only red-mask
-    |                         visualization crop, for diagnostics;
-    |                         never served by any Flask route
-    |-- detection info (confidence, bbox, instance count)
-    |-- timestamp
-    |-- GPS (when available - gps_provider.py; never fabricated)
-    v
-Inspection database (inspection_db.py, SQLite)
-    v
-PDF inspection report (report_generator.py)
+                 DJI Neo 2
+                    |
+              live video (RTMP)
+                    v
+                 MediaMTX ------> WebRTC ------> Dashboard "Live Drone POV"
+                                                 (display only, NO AI)
+
+   controller shutter button
+            |
+      DJI photo file
+            |
+      transfer to PC  (USB / SD / DJI Assistant / phone sync)
+            |
+            v
+     import watch folder  ---\
+                              >--> inspection_service (YOLO11-seg, once)
+     manual browser upload --/            |
+                                 CRACK DETECTED / NO CRACK DETECTED
+                                          |
+                          original + red-highlighted + crack-only images
+                                          |
+                              SQLite database + PDF report
 ```
 
-MediaMTX itself is **not** started, stopped, or reconfigured by this
-app - it must already be running (see "Running MediaMTX" below). The
-app only *reads* from it (RTSP frames for AI, and a reachability probe
-for the dashboard's "MediaMTX reachable" indicator) and *tells you*
-what RTMP address to type into DJI Fly.
+The live-video path and the photo-analysis path are **completely
+independent**: MediaMTX being down never blocks uploads or imports, and
+analysis never touches the RTSP stream. (This is a deliberate change
+from an earlier design that ran YOLO continuously on RTSP frames and
+produced `DESCRIBE 404` / OpenCV RTSP-timeout errors - that live
+inference loop has been removed entirely.)
 
-### Automatic capture - clean POV vs. crack-only result
+## How a captured DJI photo reaches MatanglaWIN
 
-These two things are intentionally, completely separate:
+DJI Fly / the RC controller do **not** expose a documented, reliable
+local API on Windows for pushing a freshly captured still directly into
+a third-party app. So MatanglaWIN uses a **watch folder**: point it at a
+local Windows directory and drop DJI photos there by any means. The app
+notices new files, waits until each finishes copying, de-duplicates by
+content hash, and analyzes each new photo exactly once.
 
-- **LIVE DRONE POV** (`/dashboard`'s "Drone POV" panel) - the raw
-  MediaMTX WebRTC stream, loaded directly into the browser via an
-  `<iframe>`. The backend never touches, re-encodes, or annotates these
-  frames. There is no route that serves an annotated version of the
-  live feed - `detector.py`'s `process_frame()` never produces (and
-  `DetectionResult` never carries) a full-frame overlay image.
-- **LATEST CRACK RESULT** (`/dashboard`'s "Latest Capture" panel, and
-  every row on `/inspections`) - a single still image produced only at
-  the moment of a valid detection, using the actual YOLO11-seg
-  segmentation mask (`detector.extract_crack_only()`) to black out
-  everything the mask doesn't cover. This is a small crop around the
-  crack (with a thin context margin), not a large rectangular slab of
-  surrounding surface, and not the live video.
+The DJI-to-Windows transfer step (done by you, once per set of photos)
+can be any of:
 
-Each automatic capture writes to three subfolders under
-`matanglawin_data/captures/`:
+- Connect the controller/phone by USB and copy the JPGs into the watch
+  folder, or
+- Pop the microSD card into the PC and copy the photos, or
+- Use DJI Assistant / the phone's file sync, then copy into the folder,
+  or
+- Any tool that lands the `.jpg` in the watch folder.
 
-| Folder | Contents | Exposed via a route? |
+Set the folder with `MATANGLAWIN_IMPORT_DIR` (default:
+`matanglawin_data/import/`). If a fully-automatic controller-to-PC push
+is available in your specific setup, point it at that same folder and
+imports become hands-free. **This app does not claim to talk to the
+drone directly** - it only reacts to files appearing on disk.
+
+## Result output (intentionally simple)
+
+The result page (`/inspection/<id>`) and the dashboard's "Latest
+Inspection" panel show:
+
+- **Identification**: `CRACK DETECTED` or `NO CRACK DETECTED`
+- **Original image** - the photo as captured
+- **Crack highlighted** - the same photo with every detected crack
+  highlighted in **red** (only shown when a crack is found)
+- **Crack only** - each detected crack isolated using its segmentation
+  mask, background suppressed (not a rectangular slab of surface)
+
+No confidence percentages, probability scores, FPS, or model statistics
+are shown anywhere in the UI. (A confidence value may exist internally
+for model filtering and inside `metadata.json`, but it is never
+surfaced.)
+
+## Storage layout
+
+Everything written at runtime lives under `matanglawin_data/` (created
+next to `app.py`, or next to the executable in a packaged build; not
+committed):
+
+```
+matanglawin_data/
+    import/                     <- watch folder for DJI photos (configurable)
+    upload_tmp/                 <- transient manual-upload staging
+    inspections.db              <- SQLite inspection records
+    reports/                    <- generated PDF reports
+    inspections/
+        <inspection-id>/
+            original/photo.jpg
+            highlighted/crack_highlighted.jpg   (copy of original if no crack)
+            crack/crack_001.png, crack_002.png, ...
+            metadata.json
+```
+
+## Dynamic network configuration - no hardcoded LAN IPs
+
+The live POV needs the PC's current LAN IP so you know what RTMP address
+to type into DJI Fly, and that IP changes with every network. **Nothing
+in this codebase hardcodes a LAN IP.** `network_config.py` computes
+everything at request time:
+
+- `host_ip` - priority: (1) `MATANGLAWIN_HOST_IP` env override, else
+  (2) auto-detect the active outbound interface (Windows/macOS/Linux, no
+  admin rights, no extra deps), else (3) `null` (app keeps running).
+- `rtmp_address` / `rtmp_url` - `rtmp://<host_ip>:1935[/<key>]`, what you
+  type into DJI Fly. `null` when no LAN IP.
+- `webrtc_url` - `http://localhost:8889/<key>`, the POV the browser
+  plays. Always `localhost` (MediaMTX runs on the same PC).
+
+`GET /api/network` returns these live; the dashboard polls it, so
+switching Wi-Fi updates the displayed DJI RTMP address without a
+restart or any code change.
+
+### Environment variables
+
+| Variable | Purpose | Default |
 |---|---|---|
-| `original/` | The full captured frame, unmodified - kept as evidence of what the drone saw at capture time. | No |
-| `crack/` | The crack-ONLY result (mask-based, background suppressed). | Yes - `/data/captures/crack/<file>`, used by the dashboard and PDF reports. |
-| `overlays/` | A small, per-instance red-mask visualization crop, generated for internal diagnostics/QA only. | **No.** Nothing in this app links to, serves, or displays this folder - see "No full-frame preview" below. |
+| `WEIGHTS` | Path to the `.pt` weights | `best.pt` |
+| `HOST` / `PORT` | Web server bind host / preferred port | `127.0.0.1` / `5000` |
+| `MATANGLAWIN_HOST_IP` | Force a specific LAN IP (e.g. `172.20.10.3`) | auto-detect |
+| `MATANGLAWIN_STREAM_KEY` | MediaMTX stream path/key | `matanglawin` |
+| `MATANGLAWIN_RTMP_PORT` / `RTSP_PORT` / `WEBRTC_PORT` | MediaMTX ports | `1935` / `8554` / `8889` |
+| `MATANGLAWIN_API_PORT` | MediaMTX HTTP API port (for POV status) | `9997` |
+| `MATANGLAWIN_IMPORT_DIR` | DJI photo watch folder | `<data>/import` |
+| `MATANGLAWIN_GPS_LAT` / `LON` / `ALT` | Manual GPS fix (see `gps_provider.py`) | none |
 
-### No full-frame preview
+## Live POV (MediaMTX) - optional, display only
 
-There is deliberately **no** route or code path anywhere in this app
-that serves an annotated full-frame image (i.e. the whole drone frame
-with a red mask/box/label drawn on it). An earlier debug-only route,
-`/stream/preview.jpg`, existed for this purpose and has been removed
-entirely, along with the `LivePipeline.get_latest_overlay_jpeg()`
-plumbing that fed it. The segmentation/red-mask visualization step
-still happens (see `detector.crack_overlay_crop()`), but its output is
-written only to `captures/overlays/` for internal use, on a small crop
-around a single detected instance - never on the full frame, and never
-reachable from the browser.
+The POV is optional; uploads and imports work without it. To use it,
+download MediaMTX from
+[bluenviron/mediamtx](https://github.com/bluenviron/mediamtx) and run it
+(its default config accepts any RTMP path and mirrors it to RTSP/WebRTC
+under the same path). Point DJI Fly at the RTMP address shown on the
+dashboard, stream key `matanglawin`, and the browser will play the feed.
 
-### Dynamic network configuration - no hardcoded LAN IPs
+- MatanglaWIN never starts/stops/reconfigures MediaMTX; if it isn't
+  running the dashboard just shows "MediaMTX: Not reachable" / POV
+  `UNKNOWN`, and everything else keeps working.
+- The dashboard's LIVE/OFFLINE/UNKNOWN badge comes from MediaMTX's own
+  HTTP API (`/v3/paths/get/<key>`), a lightweight publisher check - it
+  does **not** run YOLO or read frames.
 
-This PC's LAN/Wi-Fi IP address changes every time it joins a different
-network (home Wi-Fi, a different router, a mobile hotspot, etc.).
-**Nothing in this codebase hardcodes a specific LAN IP.** All
-network-facing values are computed at request time by
-`network_config.py`:
-
-- `host_ip` - this machine's current LAN IPv4 address. Priority order:
-  1. `MATANGLAWIN_HOST_IP` environment variable, if set (manual override)
-  2. Automatic detection of the OS's active outbound interface (works
-     identically on Windows/macOS/Linux, no admin rights or extra
-     dependencies required)
-  3. If neither yields a usable address (no network connected),
-     `host_ip` is `null` - the app keeps running, it just can't show a
-     DJI RTMP address yet.
-- `rtmp_address` / `rtmp_url` - `rtmp://<host_ip>:1935` and
-  `rtmp://<host_ip>:1935/<stream_key>` - what you type into DJI Fly.
-  `null` when `host_ip` is `null`.
-- `rtsp_url` / `webrtc_url` - **always** `rtsp://localhost:8554/<stream_key>`
-  and `http://localhost:8889/<stream_key>`, because MediaMTX and this
-  app run on the same PC - the AI pipeline never needs to cross the
-  network, only DJI Fly does.
-
-Query the live values at any time via `GET /api/network` (see below),
-or watch them update automatically on the dashboard - the frontend
-polls this endpoint every few seconds, so switching Wi-Fi networks
-updates the displayed DJI RTMP address without restarting the app.
-
-Optional environment variables:
-
-- `MATANGLAWIN_HOST_IP` - force a specific LAN IP instead of
-  auto-detecting one (e.g. `172.20.10.3`). Useful when auto-detection
-  picks the wrong interface on a multi-homed machine.
-- `MATANGLAWIN_STREAM_KEY` - MediaMTX stream path/key (default:
-  `matanglawin`).
-- `MATANGLAWIN_RTMP_PORT` / `MATANGLAWIN_RTSP_PORT` /
-  `MATANGLAWIN_WEBRTC_PORT` - override MediaMTX's default ports
-  (1935 / 8554 / 8889) if your MediaMTX config uses different ones.
-- `MATANGLAWIN_GPS_LAT` / `MATANGLAWIN_GPS_LON` / `MATANGLAWIN_GPS_ALT` -
-  manually supply a fixed GPS fix (e.g. for a stationary inspection
-  site, or to test the GPS-present code path without hardware). See
-  `gps_provider.py` for how a future real GPS/telemetry source can be
-  plugged in instead (`set_gps_source()`).
-
-### Running MediaMTX
-
-Download MediaMTX for your OS from
-[bluenviron/mediamtx](https://github.com/bluenviron/mediamtx) and run
-it with a config exposing the stream path `matanglawin` (the default
-MediaMTX config works out of the box - it accepts any RTMP path and
-mirrors it to RTSP/WebRTC under the same path). Start it **once**;
-this app never starts a second instance, and will simply report
-"MediaMTX: Not reachable" on the dashboard instead of erroring if it
-isn't running.
-
-### API endpoints (live pipeline)
+## API endpoints
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/network` | Current `host_ip`, `rtmp_address`, `rtmp_url`, `stream_key`, `rtsp_url`, `webrtc_url`. `host_ip: null` if no network is detected - never crashes. |
-| `GET /api/mediamtx/status` | Best-effort TCP reachability of MediaMTX's RTMP/RTSP/WebRTC ports (does not start/stop MediaMTX). |
-| `GET /api/stream/status` | `stream_state` (`OFFLINE`/`CONNECTING`/`LIVE`), detector readiness, frame/capture counters. |
-| `GET /api/gps` | Current GPS fix, or `available: false` if unavailable. |
-| `GET /api/inspections?limit=N` | Recent inspection records, newest first. |
-| `GET /api/inspections/latest` | The most recent inspection record, or `null`. |
+| `POST /api/inspect` | Upload one image (`image` field); returns the inspection result JSON. |
+| `GET /api/inspection/<id>` | Inspection metadata (status, source, GPS, crack image names, image URLs). |
+| `GET /api/inspection/latest` | Most recent inspection, or `null`. |
+| `GET /api/inspections?limit=N` | Recent inspections, newest first. |
+| `GET /api/inspection/<id>/original` | The original photo. |
+| `GET /api/inspection/<id>/highlighted` | The red-highlighted photo. |
+| `GET /api/inspection/<id>/crack/<filename>` | One crack-only image (path-traversal guarded). |
+| `GET /api/network` | Dynamic host IP / DJI RTMP address / stream key / URLs. |
+| `GET /api/mediamtx/status` | MediaMTX RTMP/RTSP/WebRTC port reachability. |
+| `GET /api/stream/status` | Display-only POV publisher state: `LIVE`/`OFFLINE`/`UNKNOWN`. No YOLO. |
+| `GET /api/gps` | Current GPS fix, or `available: false`. |
 | `GET /reports/inspection/<id>.pdf` | PDF report for one inspection. |
-| `GET /reports/full.pdf` | PDF report covering every recorded inspection. |
-| `GET /dashboard` | Live drone inspection dashboard (POV, detection status, latest capture, network panel). |
-| `GET /inspections` | Inspection history table with per-row PDF download links. |
+| `GET /reports/full.pdf` | PDF report covering all inspections. |
+| `GET /` , `/dashboard`, `/inspections`, `/inspection/<id>` | Pages. |
 
-### Option A: One-click executable (no Python required to *run* it)
+No API response exposes a confidence value.
 
-This bundles Python, the website, and `best.pt` into a single
-executable. Anyone can double-click it and use the site &mdash; they
-don't need Python, pip, or any dependencies installed.
+## Running
 
-**Build it once** (this step does need Python + the packages below):
+### Option A: One-click executable (no Python needed to run it)
+
+Bundles Python, the website, and `best.pt` into a single executable.
 
 ```bash
-# Linux/macOS
-./build_exe.sh
-
-# Windows
-build_exe.bat
+# Build once (needs Python + deps):
+./build_exe.sh      # Linux/macOS
+build_exe.bat       # Windows
 ```
 
-This creates `dist/Matanglawin` (or `dist/Matanglawin.exe` on Windows),
-a single file around 300-350&nbsp;MB (it embeds a CPU build of PyTorch).
+Produces `dist/Matanglawin(.exe)` (~300-350 MB, embeds CPU PyTorch).
+Double-click it; a console shows startup and your browser opens to the
+app. Runtime data is written to `matanglawin_data/` next to the
+executable. Build separately per OS (PyInstaller does not
+cross-compile).
 
-**Run it:** double-click `dist/Matanglawin(.exe)`. A console window
-opens showing server startup, and your default browser opens
-automatically to the site. Uploaded images and results are saved next
-to the executable in a `matanglawin_data/` folder. Closing the console
-window stops the app.
-
-> Note: build the executable separately on each OS you want to support
-> (a Linux build only runs on Linux, a Windows build only runs on
-> Windows, etc.) &mdash; PyInstaller does not cross-compile.
-
-### Option B: Run from source with Python
+### Option B: Run from source
 
 ```bash
 python3 -m venv venv
-source venv/bin/activate        # on Windows: venv\Scripts\activate
+source venv/bin/activate            # Windows: venv\Scripts\activate
 
-# Recommended: install the CPU-only build of torch first (much smaller
-# than the default CUDA build, and all that's needed for single-image
-# inference):
+# CPU-only torch is enough for single-image inference and much smaller:
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
 pip install -r requirements.txt
 
-# Linux only, if you hit "libGL.so.1: cannot open shared object file":
+# Linux only, if "libGL.so.1: cannot open shared object file":
 #   Debian/Ubuntu: sudo apt-get install -y libgl1
 #   Fedora/Amazon Linux: sudo dnf install -y mesa-libGL
 
-python app.py
+python app.py                       # set AUTO_OPEN=1 to open the browser automatically
 ```
 
-Then open http://localhost:5000 in your browser (set `AUTO_OPEN=1` to
-have it open automatically), upload an image, and click **Detect
-Cracks**. You can tweak confidence threshold, mask opacity, and outline
-thickness under "Advanced options" before detecting.
+Open http://localhost:5000, upload a photo, and view the result.
 
-Optional environment variables:
+## Files
 
-- `WEIGHTS` - path to a different `.pt` weights file (default: `best.pt`)
-- `HOST` - host to bind to (default: `127.0.0.1`)
-- `PORT` - preferred port to listen on; if busy, a free one is chosen automatically (default: `5000`)
-- `AUTO_OPEN` - set to `1` to auto-open the browser in dev mode too
-
-### Files
-
-- `app.py` - Flask web app: upload form + `/detect` (single-image), `/dashboard` + `/inspections` (live pipeline), `/api/*` endpoints, `/health` check, auto-opens browser when run as the packaged executable
-- `inference_core.py` - shared inference + overlay-drawing logic (used by both the upload flow and the live-frame detector)
-- `infer_overlay.py` - original standalone CLI script (unchanged)
-- `network_config.py` - single source of truth for LAN IP detection, DJI RTMP address, stream key, localhost RTSP/WebRTC URLs, MediaMTX reachability
-- `gps_provider.py` - optional GPS fix lookup (env override or pluggable future source); never fabricates coordinates
-- `detector.py` - per-frame YOLO11-seg wrapper + crack validation; `extract_crack_only()` (mask-based, background-suppressed crack extraction) and `crack_overlay_crop()` (internal-only red-mask diagnostic crop) - never produces a full-frame overlay
-- `video_source.py` - background RTSP reader with OFFLINE/CONNECTING/LIVE state, resilient to MediaMTX/drone disconnects
-- `capture_manager.py` - automatic capture orchestration with cooldown/debounce + GPS attachment; writes `captures/original/`, `captures/crack/`, `captures/overlays/` (see "Automatic capture" above)
-- `inspection_db.py` - SQLite-backed inspection record storage
-- `report_generator.py` - PDF inspection report generation (single crack / full report), GPS-optional
-- `live_pipeline.py` - wires video_source + detector + capture_manager together into one background pipeline
-- `templates/`, `static/` - website HTML/CSS/JS (upload page, result page, live dashboard, inspections page)
-- `matanglawin.spec` - PyInstaller build configuration for the one-click executable
-- `build_exe.sh` / `build_exe.bat` - one-command build scripts (Linux/macOS and Windows)
-- `tests/` - unit tests for network config, GPS provider, capture cooldown/dedupe, and PDF generation
-- `matanglawin_data/` (created at runtime, not committed) - uploaded images, detection results, live captures, inspection database, generated PDF reports
+- `app.py` - Flask app: pages, `/api/*`, image serving, reports; starts the photo-import watcher in `main()`.
+- `inspection_service.py` - **the** central analyze-one-photo pipeline (shared by upload and import).
+- `photo_import.py` - watch-folder importer (stability + hash dedup + restart-safe), calls the service.
+- `detector.py` - YOLO11-seg wrapper (`process_frame`), `build_union_mask`, `extract_crack_only`, `crack_overlay_crop`.
+- `inference_core.py` - model loading + mask-overlay drawing (shared with `infer_overlay.py`).
+- `infer_overlay.py` - original standalone CLI script (unchanged).
+- `network_config.py` - LAN IP detection, DJI RTMP address, stream key, localhost RTSP/WebRTC URLs, MediaMTX reachability + POV publisher status.
+- `gps_provider.py` - optional GPS fix (env override or pluggable source); never fabricates coordinates.
+- `inspection_db.py` - SQLite inspection records (status/source/paths/GPS); auto-migrates an older DB.
+- `report_generator.py` - status-based PDF reports (original + highlighted + crack images; no confidence).
+- `templates/`, `static/` - upload page, result page, dashboard, inspections page, CSS/JS.
+- `matanglawin.spec`, `build_exe.sh`, `build_exe.bat` - packaging.
+- `tests/` - unit tests (see below).
+- `matanglawin_data/` - runtime data (not committed).
 
 ## Hardware Test Procedure (DJI Neo 2)
 
-This is the exact sequence to validate the live pipeline against real
-hardware. Steps 1-9 and 13 require a real DJI Neo 2 + MediaMTX +
-network switch and **have not been executed by an AI agent** - only
-the software listed in "What was actually verified" below has been.
+Steps that require a real DJI Neo 2 / MediaMTX / network **have not been
+executed by an AI agent** - see "What was verified" below.
 
-1. Connect the PC to Wi-Fi (or Ethernet).
-2. Start MediaMTX (`mediamtx` binary, default config is sufficient).
-3. Start MatanglaWIN (`python app.py`, or the packaged executable) and
-   open `/dashboard` in a browser.
-4. Check the displayed **PC IP** in the Network panel (or `GET
-   /api/network`). Example: `172.20.10.3`.
-5. In DJI Fly, configure:
-   - RTMP Address: `rtmp://<PC IP from step 4>:1935`
-   - Stream Key: `matanglawin` (or your `MATANGLAWIN_STREAM_KEY`)
-6. Start DJI live transmission.
-7. Verify MediaMTX's own logs report the stream as available/online,
-   and the dashboard's "MediaMTX reachable" indicator is green.
-8. Verify the dashboard's **Drone Stream** badge changes from `OFFLINE`
-   to `LIVE`, and the live drone POV video appears (served directly by
-   MediaMTX's WebRTC endpoint in an iframe - no OBS/VLC/LetsView).
-9. Confirm (e.g. via MediaMTX logs or a `ffprobe`/VLC test connection)
-   that the AI pipeline is reading `rtsp://localhost:8554/matanglawin`.
-10. Point the drone camera at a crack (or any surface with a similar
-    known-good test image from the training set).
-11. Verify the dashboard's "Crack Detection" panel shows a
-    non-`OFFLINE` detector status and rising "Frames processed".
-12. Verify "Latest Capture" updates with a cropped crack image and
-    confidence percentage shortly after step 10.
-13. Verify a new row appears on `/inspections` with a timestamp and
-    (if the drone/telemetry provides it, or `MATANGLAWIN_GPS_LAT/LON`
-    is set) GPS coordinates; otherwise it correctly shows "Unavailable".
-14. Confirm GPS shows "Unavailable" (not a crash, not fabricated
-    coordinates) when no GPS source is configured.
-15. Click "Download PDF report" (single) and "Download full PDF
-    report" on `/inspections`, and confirm both open as valid PDFs
-    containing the timestamp, confidence, image, and GPS line.
+1. Connect the Windows PC to Wi-Fi.
+2. (Optional, for POV) Start MediaMTX.
+3. Start MatanglaWIN (`python app.py` or the executable).
+4. Open `/dashboard`.
+5. Confirm **Live Drone POV** displays the drone feed (after pointing
+   DJI Fly at the RTMP address shown in the Network panel, stream key
+   `matanglawin`).
+6. Confirm the live feed has **no** red boxes/masks/overlays.
+7. Point the drone at a surface.
+8. Press the DJI controller camera/shutter button to capture a photo.
+9. Transfer that photo into the import folder (see "How a captured DJI
+   photo reaches MatanglaWIN"); confirm it lands in
+   `MATANGLAWIN_IMPORT_DIR`.
+10. Confirm MatanglaWIN detects the new photo (it appears on
+    `/inspections` / "Latest Inspection").
+11. Confirm YOLO ran once on that photo (one new inspection record, not
+    a stream of them).
+12. Confirm the result says `CRACK DETECTED` or `NO CRACK DETECTED`.
+13. Confirm the original image is available.
+14. Confirm the red-highlighted image is available (when a crack was
+    found).
+15. Confirm the crack-only image(s) are available (when a crack was
+    found).
+16. Confirm the live POV is still clean (no AI overlay).
+17. Capture and import another photo.
+18. Confirm the previous photo is not re-processed (content-hash dedup).
+19. Change Wi-Fi networks.
+20. Confirm the dashboard's PC IP / DJI RTMP address update
+    automatically, with no code change.
 
-### Network-switch test
+### What was verified in this environment vs. what still needs hardware
 
-After the above, disconnect from the current network and connect to a
-different one (different Wi-Fi, mobile hotspot, or Ethernet). Confirm,
-**without restarting MatanglaWIN**, that the dashboard's PC IP and DJI
-RTMP address update to the new network's address within a few seconds
-(the frontend polls `GET /api/network` periodically). Only the RTMP
-address typed into DJI Fly needs to change on the new network - the
-stream key, RTSP URL, and WebRTC URL stay the same.
+**Verified** (no DJI Neo 2, no MediaMTX, no real LAN in this sandbox;
+YOLO stubbed with synthetic masks since the heavy model isn't installed
+here):
 
-### What was actually verified (this change) vs. what still needs real hardware
+- Photo analysis end-to-end (`inspection_service.py`): no-crack and
+  crack cases, multiple cracks, mask-based crack-only extraction
+  (background suppressed, not a rectangle), original preserved,
+  red-highlighted image generated, `metadata.json` written, GPS attached
+  when available / "Unavailable" (never fabricated) otherwise.
+- Upload and import produce identical results via the same pipeline.
+- Watch-folder importer (`photo_import.py`): partial-copy safety
+  (size-stability), SHA-256 content dedup, restart persistence, corrupt
+  files marked invalid without crashing, `source="import"` recorded.
+- No live-video inference remains: `live_pipeline.py` / `video_source.py`
+  / `capture_manager.py` are deleted, nothing imports them, and no
+  runtime module uses `cv2.VideoCapture` (guarded by a test).
+- Dynamic LAN IP: auto-detect, `MATANGLAWIN_HOST_IP` override (valid and
+  invalid), no-network fallback; RTSP/WebRTC always `localhost`;
+  `MATANGLAWIN_STREAM_KEY` honored; no hardcoded LAN IP anywhere
+  (repo-wide audit + test).
+- MediaMTX port reachability and POV publisher status degrade to
+  "not reachable" / `UNKNOWN` without crashing when MediaMTX is absent.
+- PDF reports (single/full, crack/no-crack, missing image, empty set),
+  status-based, with no confidence shown.
+- All Flask routes via the test client, including image serving,
+  crack-image path-traversal protection, and that removed routes
+  (`/stream/preview.jpg`, `/data/captures/*`) are gone.
+- Full suite: **93 tests passing**.
 
-**Verified in this environment** (no DJI Neo 2, no MediaMTX instance,
-no real LAN available in this sandbox):
+**Still requires real hardware/software** (cannot be verified here):
 
-- LAN IP auto-detection logic, `MATANGLAWIN_HOST_IP` override (valid
-  and invalid), and the no-network fallback (`network_config.py`)
-- Dynamic RTMP/RTSP/WebRTC URL generation, and that RTSP/WebRTC always
-  use `localhost` regardless of the detected/overridden LAN IP
-- `MATANGLAWIN_STREAM_KEY` override
-- MediaMTX port-reachability probing against a real closed port
-  (correctly reports `Not reachable` without crashing or retrying
-  forever)
-- RTSP video source state machine (OFFLINE / CONNECTING / LIVE) against
-  both a real (absent) RTSP endpoint and a mocked `cv2.VideoCapture`
-  simulating a live stream and a mid-stream disconnect
-- Per-frame crack detection, minimum-area filtering, and mask-based
-  crack-only extraction (`detector.extract_crack_only()` correctly
-  suppresses background pixels outside the segmentation mask, verified
-  against both a thin/diagonal mask and a fully-filled mask) using a
-  mocked YOLO result (no real YOLO installed in the test environment)
-- Capture cooldown/debounce, low-confidence rejection, GPS attachment
-  (present and unavailable), and the three-way `original/`/`crack/`/
-  `overlays/` file layout end-to-end into a real SQLite database
-  (`capture_manager.py`, `inspection_db.py`)
-- The `/data/captures/<path:filename>` route correctly serves files
-  inside the new `crack/`/`original/`/`overlays/` subfolders, and the
-  dashboard/inspections frontend correctly builds URLs that include
-  the subfolder (a bug where `.split('/').pop()` dropped the subfolder
-  and 404'd was caught by a regression test and fixed)
-- Confirmed no route or template references `/stream/preview.jpg` (it
-  has been removed entirely, along with the full-frame overlay
-  plumbing that fed it)
-- PDF generation for single/full reports, with and without GPS, with a
-  missing image, and with zero inspections (`report_generator.py`)
-- All new Flask routes (`/api/network`, `/api/mediamtx/status`,
-  `/api/stream/status`, `/api/gps`, `/api/inspections*`, `/dashboard`,
-  `/inspections`, `/reports/*`) via Flask's test client
-- The original single-image upload flow (`/`, `/detect`, `/health`)
-  still compiles and its route wiring is unchanged
+- Real WebRTC POV playback from a running MediaMTX fed by DJI Fly.
+- Real YOLO11-seg accuracy/latency on actual DJI photos from `best.pt`.
+- The physical DJI-to-Windows photo transfer for your specific
+  controller/OS setup, and whether any hands-free push is available.
+- Real GPS/telemetry from the DJI Neo 2 (wire a real source into
+  `gps_provider.set_gps_source()` if/when you have one).
+- Behavior across real Wi-Fi network switches on the target Windows PC.
 
-**Still requires real hardware testing** (cannot be verified without a
-physical DJI Neo 2, a running MediaMTX instance, and a real network):
-
-- Actual DJI Fly -> MediaMTX RTMP publish and MediaMTX's real
-  "stream is available and online" / disconnect log lines
-- Real WebRTC playback in a browser from MediaMTX's `/matanglawin`
-  WebRTC endpoint
-- Real YOLO11-seg inference on live drone frames from `best.pt`
-  (correctness/latency on real crack imagery, not synthetic masks)
-- End-to-end automatic capture while physically flying over a real
-  crack
-- Real GPS/telemetry availability from the DJI Neo 2 (this app does
-  not assume any particular DJI telemetry format is available; if you
-  have a way to feed real telemetry, wire it in via
-  `gps_provider.set_gps_source()`)
-- Behavior when switching real Wi-Fi networks/hotspots on the actual
-  target Windows PC
+> Photo automatic transfer from the DJI controller is **not** claimed to
+> work out of the box: MatanglaWIN analyzes whatever photo lands in the
+> import folder. The transfer of the file from the controller to that
+> folder is a documented manual step unless your setup provides an
+> automatic local sync.

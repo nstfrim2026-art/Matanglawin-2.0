@@ -3,7 +3,7 @@
 {% block content %}
   <section class="hero">
     <h1>Inspection History</h1>
-    <p>Every automatically-captured crack detection, with GPS (when available) and PDF reports.</p>
+    <p>Every photo inspection (manual upload or DJI import), with GPS when available and PDF reports.</p>
   </section>
 
   <section class="card panel">
@@ -17,33 +17,21 @@
           <th>#</th>
           <th>Timestamp</th>
           <th>Image</th>
-          <th>Confidence</th>
-          <th>Instances</th>
+          <th>Status</th>
+          <th>Cracks</th>
+          <th>Source</th>
           <th>GPS</th>
           <th>Report</th>
         </tr>
       </thead>
       <tbody id="inspections-body">
-        <tr><td colspan="7" class="hint">Loading inspections&hellip;</td></tr>
+        <tr><td colspan="8" class="hint">Loading inspections&hellip;</td></tr>
       </tbody>
     </table>
     <p id="inspections-empty" class="hint" style="display:none;">No inspections recorded yet.</p>
   </section>
 
   <script>
-    // See static/dashboard.js's captureUrl() for why this keeps the
-    // "crack/<filename>" part rather than just the bare filename:
-    // captures now live under original/, crack/, and overlays/
-    // subfolders (see capture_manager.py).
-    function captureUrl(storedPath) {
-      if (!storedPath) return '';
-      const normalized = storedPath.replace(/\\/g, '/');
-      const marker = '/captures/';
-      const idx = normalized.lastIndexOf(marker);
-      const relative = idx >= 0 ? normalized.slice(idx + marker.length) : normalized.split('/').pop();
-      return '/data/captures/' + relative;
-    }
-
     async function loadInspections() {
       const body = document.getElementById('inspections-body');
       const emptyMsg = document.getElementById('inspections-empty');
@@ -61,21 +49,26 @@
           const gps = it.gps_available
             ? `${it.latitude.toFixed(5)}, ${it.longitude.toFixed(5)}`
             : 'Unavailable';
-          const confPct = (it.confidence * 100).toFixed(1) + '%';
-          const imgUrl = captureUrl(it.cropped_image_path);
+          const urls = it.urls || {};
+          // Prefer the highlighted image as the thumbnail when a crack
+          // was found, otherwise the original.
+          const thumb = (it.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
+          const statusClass = it.has_crack ? 'status-pill-crack' : 'status-pill-ok';
+          const source = it.source === 'import' ? 'DJI import' : 'Manual upload';
           return `
             <tr>
               <td>${it.id}</td>
               <td>${it.timestamp}</td>
-              <td><img src="${imgUrl}" alt="crack" class="thumb"></td>
-              <td>${confPct}</td>
+              <td><a href="/inspection/${it.id}"><img src="${thumb}" alt="inspection" class="thumb"></a></td>
+              <td><span class="status-pill ${statusClass}">${it.status}</span></td>
               <td>${it.num_instances}</td>
+              <td>${source}</td>
               <td>${gps}</td>
               <td><a href="/reports/inspection/${it.id}.pdf" class="btn-secondary btn-small">PDF</a></td>
             </tr>`;
         }).join('');
       } catch (err) {
-        body.innerHTML = `<tr><td colspan="7" class="hint">Failed to load inspections: ${err}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="8" class="hint">Failed to load inspections: ${err}</td></tr>`;
       }
     }
 

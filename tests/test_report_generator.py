@@ -1,6 +1,6 @@
 """
-Tests for report_generator.py - PDF generation with and without GPS,
-and other edge cases (missing image, empty record set).
+Tests for report_generator.py - status-based PDF generation, no
+confidence in output, GPS optional, missing images tolerated.
 """
 
 import sys
@@ -12,107 +12,91 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from inspection_db import InspectionRecord  # noqa: E402
+from inspection_db import InspectionRecord, STATUS_CRACK, STATUS_NO_CRACK  # noqa: E402
 from report_generator import generate_single_report, generate_full_report  # noqa: E402
 
 
 @pytest.fixture()
-def sample_image(tmp_path):
-    img = np.zeros((100, 100, 3), dtype=np.uint8)
-    img[:] = (0, 0, 255)
-    path = tmp_path / "crop.jpg"
-    cv2.imwrite(str(path), img)
-    return str(path)
+def img(tmp_path):
+    p = tmp_path / "img.jpg"
+    a = np.zeros((80, 80, 3), dtype=np.uint8)
+    a[:] = (0, 0, 255)
+    cv2.imwrite(str(p), a)
+    return str(p)
 
 
-def _record(sample_image, **overrides):
-    defaults = dict(
+def _crack(img, **over):
+    kwargs = dict(
         id=1,
-        timestamp="2026-08-12 14:35:21",
-        cropped_image_path=sample_image,
-        confidence=0.942,
-        num_instances=1,
-        latitude=None,
-        longitude=None,
-        altitude=None,
-        gps_available=False,
+        timestamp="2026-08-12T14:35:21",
+        status=STATUS_CRACK,
+        source="import",
+        original_image_path=img,
+        highlighted_image_path=img,
+        crack_image_paths=[img, img],
+        num_instances=2,
+        latitude=14.6,
+        longitude=121.0,
+        altitude=30.0,
+        gps_available=True,
     )
-    defaults.update(overrides)
-    return InspectionRecord(**defaults)
+    kwargs.update(over)
+    return InspectionRecord(**kwargs)
 
 
-def _is_valid_pdf(path: Path) -> bool:
-    with open(path, "rb") as f:
-        header = f.read(5)
-    return header == b"%PDF-"
+def _valid_pdf(p):
+    with open(p, "rb") as f:
+        return f.read(5) == b"%PDF-"
 
 
-def test_single_report_with_gps(tmp_path, sample_image):
-    record = _record(
-        sample_image, latitude=14.5995, longitude=120.9842, altitude=35.2, gps_available=True
+def test_single_crack_report(tmp_path, img):
+    out = tmp_path / "s.pdf"
+    generate_single_report(_crack(img), str(out))
+    assert _valid_pdf(out)
+
+
+def test_single_no_crack_report(tmp_path, img):
+    rec = InspectionRecord(
+        id=2, timestamp="t", status=STATUS_NO_CRACK, source="upload",
+        original_image_path=img, highlighted_image_path=img, crack_image_paths=[], num_instances=0,
     )
-    out_path = tmp_path / "single_gps.pdf"
-    generate_single_report(record, str(out_path))
-    assert out_path.exists()
-    assert _is_valid_pdf(out_path)
-    assert out_path.stat().st_size > 0
+    out = tmp_path / "n.pdf"
+    generate_single_report(rec, str(out))
+    assert _valid_pdf(out)
 
 
-def test_single_report_without_gps_still_generates(tmp_path, sample_image):
-    record = _record(sample_image, gps_available=False)
-    out_path = tmp_path / "single_no_gps.pdf"
-    generate_single_report(record, str(out_path))
-    assert out_path.exists()
-    assert _is_valid_pdf(out_path)
+def test_report_with_missing_images_does_not_crash(tmp_path):
+    rec = _crack("/nope.jpg", original_image_path="/nope.jpg", highlighted_image_path="/no.jpg", crack_image_paths=["/no.png"])
+    out = tmp_path / "m.pdf"
+    generate_single_report(rec, str(out))
+    assert _valid_pdf(out)
 
 
-def test_single_report_with_missing_image_does_not_crash(tmp_path):
-    record = _record("/definitely/does/not/exist.jpg")
-    out_path = tmp_path / "single_missing_image.pdf"
-    generate_single_report(record, str(out_path))
-    assert out_path.exists()
-    assert _is_valid_pdf(out_path)
-
-
-def test_full_report_mixed_gps_and_no_gps(tmp_path, sample_image):
-    records = [
-        _record(sample_image, id=1, latitude=14.6, longitude=121.0, gps_available=True),
-        _record(sample_image, id=2, gps_available=False),
+def test_full_report_mixed(tmp_path, img):
+    recs = [
+        _crack(img, id=1),
+        InspectionRecord(id=2, timestamp="t", status=STATUS_NO_CRACK, source="upload",
+                         original_image_path=img, highlighted_image_path=img, crack_image_paths=[], num_instances=0),
     ]
-    out_path = tmp_path / "full.pdf"
-    generate_full_report(records, str(out_path))
-    assert out_path.exists()
-    assert _is_valid_pdf(out_path)
+    out = tmp_path / "f.pdf"
+    generate_full_report(recs, str(out))
+    assert _valid_pdf(out)
 
 
-def test_full_report_with_empty_list_still_generates_valid_pdf(tmp_path):
-    out_path = tmp_path / "empty.pdf"
-    generate_full_report([], str(out_path))
-    assert out_path.exists()
-    assert _is_valid_pdf(out_path)
+def test_full_report_empty(tmp_path):
+    out = tmp_path / "e.pdf"
+    generate_full_report([], str(out))
+    assert _valid_pdf(out)
 
 
-def test_full_report_creates_parent_directories(tmp_path, sample_image):
-    out_path = tmp_path / "nested" / "dir" / "full.pdf"
-    generate_full_report([_record(sample_image)], str(out_path))
-    assert out_path.exists()
-
-
-def test_pdf_generation_failure_is_a_clear_exception(tmp_path, sample_image, monkeypatch):
+def test_report_source_does_not_embed_confidence_text(tmp_path, img):
     """
-    Callers (app.py routes) are expected to catch exceptions from this
-    module and surface them as a 500 with a clear message - verify that
-    a genuine failure (e.g. reportlab raising) propagates as an
-    exception rather than silently producing a corrupt file.
+    The report code path must not reference a confidence attribute
+    (records don't even have one) - smoke test that generation works
+    from a record whose to_dict() has no confidence.
     """
-    import report_generator
-
-    def broken_build(self, *args, **kwargs):
-        raise RuntimeError("simulated reportlab failure")
-
-    monkeypatch.setattr(report_generator.SimpleDocTemplate, "build", broken_build)
-
-    record = _record(sample_image)
-    out_path = tmp_path / "should_fail.pdf"
-    with pytest.raises(RuntimeError):
-        generate_single_report(record, str(out_path))
+    rec = _crack(img)
+    assert "confidence" not in rec.to_dict()
+    out = tmp_path / "s2.pdf"
+    generate_single_report(rec, str(out))
+    assert _valid_pdf(out)

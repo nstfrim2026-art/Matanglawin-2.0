@@ -2,12 +2,13 @@
 {% block title %}Matanglawin - Upload Image{% endblock %}
 {% block content %}
   <section class="hero">
-    <h1>Detect surface cracks in one click</h1>
+    <h1>Inspect a photo for cracks</h1>
     <p>
       Upload a photo of a road, wall, or structure and Matanglawin will
-      highlight every crack it finds using a semi-transparent mask that
-      follows the exact crack shape &mdash; no bounding boxes, just the
-      true outline.
+      report <strong>CRACK DETECTED</strong> or <strong>NO CRACK DETECTED</strong>,
+      highlight every crack it finds in red, and isolate each crack using
+      its exact segmentation mask. DJI photos dropped into the import
+      folder are analyzed the same way, automatically.
     </p>
   </section>
 
@@ -25,25 +26,7 @@
 
       <img id="preview" class="preview-img" alt="" style="display:none;">
 
-      <details class="advanced">
-        <summary>Advanced options</summary>
-        <div class="advanced-grid">
-          <label>
-            Confidence threshold
-            <input type="number" name="conf" min="0" max="1" step="0.05" value="0.25">
-          </label>
-          <label>
-            Mask opacity
-            <input type="number" name="alpha" min="0" max="1" step="0.05" value="0.5">
-          </label>
-          <label>
-            Outline thickness (px)
-            <input type="number" name="outline" min="0" max="10" step="1" value="2">
-          </label>
-        </div>
-      </details>
-
-      <button type="submit" class="btn-primary">Detect Cracks</button>
+      <button type="submit" class="btn-primary">Inspect Photo</button>
     </form>
   </section>
 

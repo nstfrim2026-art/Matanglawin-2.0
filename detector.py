@@ -1,43 +1,35 @@
 """
-detector.py - Frame-by-frame crack detection for the live drone pipeline.
+detector.py - Single-image crack detection (YOLO11-seg).
 
-This wraps the same YOLO11-seg model (best.pt) and mask-drawing helpers
-used by the single-image upload flow (inference_core.py), but operates
-on individual video frames pulled from the RTSP stream (video_source.py)
-instead of an uploaded file.
+Wraps the trained YOLO11-seg model (best.pt) and the shared mask-drawing
+helpers (inference_core.py) to analyze ONE still image at a time. It is
+used by inspection_service.py for both manually uploaded photos and
+photos imported from the DJI controller.
 
-Pipeline position:
+    image (BGR)  ->  CrackDetector.process_frame()  ->  DetectionResult
+                                                              |
+                                                              v
+                                                   inspection_service.py
+                                        (build result images + DB record)
 
-    RTSP frame -> Detector.process_frame() -> DetectionResult
-                                                  |
-                                                  v
-                                          capture_manager.py
-                                       (validation + auto-capture)
+There is deliberately NO continuous/video code path here: the model is
+invoked once per photo, not on a stream of frames. The live drone POV is
+served straight from MediaMTX's WebRTC endpoint to the browser and never
+touches this module.
 
-Responsibilities kept here:
-    - Run YOLO11-seg inference on a raw BGR frame (reusing
-      inference_core.predict_masks / union_mask_from_result so detection
-      logic never diverges from the upload flow).
-    - Keep each crack instance's own segmentation mask (not just its
-      bounding box), so downstream code can extract "only the crack
-      pixels", not a rectangular slab of surrounding surface.
+Responsibilities:
+    - Run YOLO11-seg on a BGR image, keeping each crack instance's own
+      segmentation mask (not just its bounding box).
     - Basic detection-quality validation (confidence floor, minimum
-      crack pixel area) so obviously-noisy predictions don't trigger a
-      capture.
-    - Provide `extract_crack_only()` / `crack_overlay_crop()` helpers
-      that turn a single instance's mask into (a) a crack-only image
-      with the background suppressed, and (b) a small red-mask
-      visualization crop - both operating on a small crop around the
-      crack, never on the full frame.
-
-Explicitly NOT this module's job:
-    - Deciding whether to *save* a capture, cooldown/debounce, writing
-      to the database - that's capture_manager.py.
-    - Talking to RTSP/MediaMTX - that's video_source.py.
-    - Producing any full-frame annotated preview. There is intentionally
-      no code path here that overlays a mask on the *entire* live frame
-      for display purposes - see capture_manager.py and README.md for
-      why (the live POV must always stay a clean, unannotated feed).
+      crack pixel area) to drop obvious noise. Confidence is used only
+      internally for filtering and is never surfaced to the UI.
+    - Helpers to turn masks into result images:
+        * build_union_mask()      - full-image mask of all cracks, for
+                                     the red-highlighted result photo.
+        * extract_crack_only()    - a crack-only image (background
+                                     suppressed via the mask), not a
+                                     rectangular slab of surface.
+        * crack_overlay_crop()    - a small red-mask crop of one crack.
 """
 
 from __future__ import annotations
@@ -99,9 +91,9 @@ class CrackDetector:
 
     def process_frame(self, frame: np.ndarray) -> DetectionResult:
         """
-        Run detection on a single BGR frame (as returned by OpenCV's
-        VideoCapture). Returns a DetectionResult describing every crack
-        instance that passed basic quality validation.
+        Run detection on a single decoded BGR image. Returns a
+        DetectionResult describing every crack instance that passed
+        basic quality validation.
 
         Note: this deliberately does NOT produce any full-frame overlay
         or preview image. Only per-instance masks (each cropped to its
@@ -151,6 +143,26 @@ class CrackDetector:
             instances=instances,
             max_confidence=max_conf,
         )
+
+
+def build_union_mask(instances: List[CrackInstance], shape_hw: Tuple[int, int]) -> np.ndarray:
+    """
+    Reassemble a single full-image binary mask (H, W) covering every
+    crack instance, by placing each instance's bbox-aligned mask back at
+    its position in the frame. Used to draw the red-highlighted result
+    image (the full photo with ALL detected cracks highlighted), which
+    is a result-page artifact only - never the live POV.
+    """
+    h, w = shape_hw
+    union = np.zeros((h, w), dtype=np.uint8)
+    for inst in instances:
+        x1, y1, x2, y2 = inst.bbox
+        mh, mw = inst.mask.shape
+        # Clamp in case of any off-by-one from resizing/rounding.
+        y2c, x2c = min(y1 + mh, h), min(x1 + mw, w)
+        sub = inst.mask[: y2c - y1, : x2c - x1]
+        union[y1:y2c, x1:x2c] = np.maximum(union[y1:y2c, x1:x2c], sub)
+    return union
 
 
 def _bbox_from_mask(mask_bin: np.ndarray, frame_shape: Tuple[int, int]) -> Optional[Tuple[int, int, int, int]]:
@@ -230,13 +242,11 @@ def crack_overlay_crop(
 ) -> np.ndarray:
     """
     Produce a small red-mask visualization of one crack instance,
-    cropped to its own region (never the full frame). Internal use only
-    (see capture_manager.py's `captures/overlays/` folder) - this is NOT
-    exposed through any Flask route or used as the live POV. It exists
-    so the red-mask/contour visualization step described in the
-    architecture is still actually performed and available for
-  internal diagnostics, without ever becoming a full-frame annotated
-    preview.
+    cropped to its own region (never the full frame). This is an
+    internal diagnostic helper: the result page's red highlight uses the
+    full-image build_union_mask + draw_mask_overlay path, and the
+    crack-only images use extract_crack_only; this per-instance crop is
+    available for QA but is not part of the main workflow.
     """
     h, w = frame.shape[:2]
     x1, y1, x2, y2 = instance.bbox

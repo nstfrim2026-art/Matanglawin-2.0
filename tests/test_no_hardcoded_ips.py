@@ -25,11 +25,10 @@ RUNTIME_PY_FILES = [
     "inference_core.py",
     "infer_overlay.py",
     "detector.py",
-    "video_source.py",
     "inspection_db.py",
-    "capture_manager.py",
+    "inspection_service.py",
+    "photo_import.py",
     "report_generator.py",
-    "live_pipeline.py",
 ]
 
 # A private-use IPv4 literal, e.g. 172.20.10.3, 192.168.1.20, 10.0.254.31.
