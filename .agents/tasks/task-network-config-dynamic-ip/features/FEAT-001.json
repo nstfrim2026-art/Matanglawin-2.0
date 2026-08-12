@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create network_config.py module for LAN IP auto-detection, RTMP address generation, and MediaMTX reachability checks. Remove the hardcoded IP_CAMERA_URL default from app.py. Add GET /api/network endpoint to app.py. Wire the network config into the application startup.",
+  "status": "in_progress",
+  "steps": [
+    "Create network_config.py in the project root with: (a) detect_lan_ip() function using socket.socket(AF_INET, SOCK_DGRAM) connect to 8.8.8.8:80 pattern for cross-platform LAN IP detection. Must filter out 127.x.x.x and 169.254.x.x. (b) Support MATANGLAWIN_HOST_IP env var override - if set, use that instead of auto-detection. (c) Support MATANGLAWIN_STREAM_KEY env var (default: 'matanglawin'). (d) get_rtmp_address() function that returns rtmp://<detected-ip>:1935/<stream_key>. (e) get_network_info() function returning dict with host_ip, rtmp_address, stream_key, rtsp_url (always rtsp://localhost:8554/<stream_key>), webrtc_url (from MEDIAMTX_URL env var). (f) check_mediamtx_reachable() function that does a TCP port check on localhost:8554 and localhost:8889 with short timeout (1-2s). (g) get_stream_status() that checks if MediaMTX is reachable and returns connectivity info.",
+    "In app.py: (a) Import network_config module. (b) Remove the hardcoded default 'http://192.168.1.50:4747/video' from IP_CAMERA_URL - change to empty string or None default (the IP camera source is only used when explicitly configured via env var). (c) Add GET /api/network route that calls network_config.get_network_info() and also includes mediamtx_reachable status from check_mediamtx_reachable(). (d) Pass stream_key to MEDIAMTX_RTSP_URL construction so it uses the dynamic stream key.",
+    "In video_source.py line 62: Update the docstring comment that references '192.168.1.5:4747/video' to use a generic placeholder like '<camera-ip>:4747/video' instead."
+  ],
+  "acceptance_criteria": [
+    "network_config.py exists and can be imported without errors",
+    "detect_lan_ip() returns a valid IPv4 address (not 127.x, not 169.254.x) or None",
+    "MATANGLAWIN_HOST_IP env var overrides auto-detection when set",
+    "MATANGLAWIN_STREAM_KEY env var defaults to 'matanglawin'",
+    "get_rtmp_address() returns rtmp://<ip>:1935/<stream_key>",
+    "GET /api/network returns JSON with host_ip, rtmp_address, stream_key, rtsp_url, webrtc_url keys",
+    "No hardcoded 192.168.x.x IP remains in runtime Python code (only in docs/comments)",
+    "app.py IP_CAMERA_URL default no longer contains a hardcoded IP"
+  ],
+  "verification": [
+    "Run: python -c \"import network_config; info = network_config.get_network_info(); print(info); assert 'host_ip' in info; assert 'rtmp_address' in info; assert 'stream_key' in info; assert 'rtsp_url' in info; assert 'webrtc_url' in info\"",
+    "Run: python -c \"from app import app; c = app.test_client(); r = c.get('/api/network'); data = r.get_json(); print(data); assert r.status_code == 200; assert 'host_ip' in data; assert 'rtmp_address' in data\"",
+    "Run: grep -rn '192\\.168\\.' *.py | grep -v '#' | grep -v 'README\\|DEPLOY' and confirm no results from runtime code"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

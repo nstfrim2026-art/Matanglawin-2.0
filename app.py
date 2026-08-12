@@ -28,7 +28,7 @@ Environment variables (optional):
     CONF            Detection confidence threshold (default: 0.25)
     TARGET_FPS      Cap on inference loop rate (default: 8)
     DEFAULT_SOURCE  "webcam" | "ip_camera" | "drone" (default: drone)
-    IP_CAMERA_URL   e.g. http://192.168.1.50:4747/video
+    IP_CAMERA_URL   e.g. http://<camera-ip>:4747/video
     MEDIAMTX_RTSP_URL  RTSP URL for MediaMTX drone stream (default: rtsp://localhost:8554/matanglawin)
     MEDIAMTX_URL       MediaMTX WebRTC player base URL (default: http://localhost:8889)
 """
@@ -42,6 +42,7 @@ from flask import (
     Flask, Response, jsonify, render_template, request, send_file,
 )
 
+import network_config
 from detector import Detector
 from inference_core import get_model
 from inspection_db import (
@@ -69,8 +70,9 @@ WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 CONF = float(os.environ.get("CONF", 0.40))
 TARGET_FPS = float(os.environ.get("TARGET_FPS", 8))
 DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "drone")
-IP_CAMERA_URL = os.environ.get("IP_CAMERA_URL", "http://192.168.1.50:4747/video")
-MEDIAMTX_RTSP_URL = os.environ.get("MEDIAMTX_RTSP_URL", "rtsp://localhost:8554/matanglawin")
+IP_CAMERA_URL = os.environ.get("IP_CAMERA_URL", "")
+STREAM_KEY = network_config.get_stream_key()
+MEDIAMTX_RTSP_URL = os.environ.get("MEDIAMTX_RTSP_URL", f"rtsp://localhost:8554/{STREAM_KEY}")
 MEDIAMTX_URL = os.environ.get("MEDIAMTX_URL", "http://localhost:8889")
 DRONE_URL = MEDIAMTX_RTSP_URL
 
@@ -158,6 +160,14 @@ def health():
         return {"status": "ok", "weights": WEIGHTS}
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "detail": str(exc)}, 500
+
+
+@app.route("/api/network", methods=["GET"])
+def api_network():
+    """Return current network configuration and MediaMTX reachability."""
+    info = network_config.get_network_info()
+    reachability = network_config.check_mediamtx_reachable()
+    return jsonify({**info, **reachability})
 
 
 # ---------------------------------------------------------------------------

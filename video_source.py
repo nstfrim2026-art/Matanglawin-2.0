@@ -59,7 +59,7 @@ class VideoSource:
     Thin, swappable wrapper around cv2.VideoCapture.
 
     Usage:
-        vs = VideoSource(spec=0)   # or spec="http://192.168.1.5:4747/video"
+        vs = VideoSource(spec=0)   # or spec="http://<camera-ip>:4747/video"
         vs.open()
         ok, frame = vs.read()
         vs.release()

@@ -1,0 +1,27 @@
+{
+  "project_type": "Python Flask web app - real-time drone crack detection dashboard",
+  "language": "Python 3.11 (backend), vanilla JS (frontend)",
+  "build_system": "pip with requirements.txt, venv-based; PyInstaller for packaging",
+  "test_framework": "Custom integration tests in tests/test_integration.py (unittest-style assertions, no pytest)",
+  "build_command": "python -c \"import app; import detector; import video_source; import capture_manager; import inference_core; import gps_provider; import inspection_db; import report_generator; import image_quality; import crack_validator\"",
+  "test_command": "cd /projects/sandbox/Matanglawin-2.0 && python tests/test_integration.py",
+  "verification_instructions": "1. Run python tests/test_integration.py and confirm ALL INTEGRATION TESTS PASSED. 2. Verify no hardcoded IPs in runtime code (grep for IP patterns excluding README.md, DEPLOY.md, comments).",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q && pip install -r requirements.txt -q",
+  "environment_constraints": "OPEN_INTERNET network mode. No Docker daemon available for build verification. Tests run on host. The YOLO model file best.pt exists in the project root.",
+  "contribution_requirements": "Preserve all existing functionality. Do not rebuild from scratch. Fix/extend existing code. No hardcoded IPs in runtime code. The IP_CAMERA_URL default is the ONLY hardcoded IP in runtime code currently.",
+  "key_patterns": "Flask app in app.py with routes. Video source abstraction in video_source.py with build_registry(). Background detector thread in detector.py. Capture state machine in capture_manager.py. Tests are self-contained in tests/test_integration.py with assert-based checks. Config via env vars at module level. Frontend polls /status and /capture/status with setInterval. Dark theme CSS with CSS vars.",
+  "relevant_files": [
+    "app.py",
+    "video_source.py",
+    "detector.py",
+    "templates/dashboard.html",
+    "static/js/dashboard.js",
+    "static/style.css",
+    "tests/test_integration.py",
+    "README.md",
+    "DEPLOY.md",
+    "requirements.txt"
+  ],
+  "directory_structure": "Root: app.py (Flask), detector.py, video_source.py, capture_manager.py, inference_core.py, gps_provider.py, inspection_db.py, report_generator.py, image_quality.py, crack_validator.py. templates/: dashboard.html, inspections.html. static/: style.css, js/dashboard.js, img/, sounds/. tests/: test_integration.py."
+}
