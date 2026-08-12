@@ -130,20 +130,12 @@
         <div class="live-feed-panel">
           <div class="live-feed-header">
             <span class="live-indicator" id="liveDot"></span>
-            <span class="live-indicator-text">LIVE FEED</span>
+            <span class="live-indicator-text">DRONE POV</span>
           </div>
           <div class="live-feed-frame">
-            <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Live camera feed" class="live-feed-img">
-          </div>
-          <div class="source-selector">
-            <span class="source-label">Camera Source:</span>
-            <div class="source-options" id="sourceOptions">
-              {% for src in sources %}
-              <label class="source-option">
-                <input type="radio" name="source" value="{{ src.key }}" {{ 'checked' if loop.first else '' }}>
-                <span>{{ src.label }}</span>
-              </label>
-              {% endfor %}
+            <iframe id="droneStream" src="{{ mediamtx_url }}/matanglawin" class="live-feed-iframe" allow="autoplay" allowfullscreen></iframe>
+            <div id="streamDisconnected" class="stream-disconnected-overlay" style="display:none;">
+              <span>STREAM DISCONNECTED</span>
             </div>
           </div>
           <div class="threshold-control">

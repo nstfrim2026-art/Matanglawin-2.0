@@ -27,9 +27,10 @@ Environment variables (optional):
     PORT           Preferred port (default: 5000)
     CONF            Detection confidence threshold (default: 0.25)
     TARGET_FPS      Cap on inference loop rate (default: 8)
-    DEFAULT_SOURCE  "webcam" | "ip_camera" | "drone" (default: webcam)
+    DEFAULT_SOURCE  "webcam" | "ip_camera" | "drone" (default: drone)
     IP_CAMERA_URL   e.g. http://192.168.1.50:4747/video
-    DRONE_URL       Placeholder URL/RTSP for a future drone camera feed
+    MEDIAMTX_RTSP_URL  RTSP URL for MediaMTX drone stream (default: rtsp://localhost:8554/matanglawin)
+    MEDIAMTX_URL       MediaMTX WebRTC player base URL (default: http://localhost:8889)
 """
 
 import os
@@ -67,9 +68,11 @@ else:
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 CONF = float(os.environ.get("CONF", 0.40))
 TARGET_FPS = float(os.environ.get("TARGET_FPS", 8))
-DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "webcam")
+DEFAULT_SOURCE = os.environ.get("DEFAULT_SOURCE", "drone")
 IP_CAMERA_URL = os.environ.get("IP_CAMERA_URL", "http://192.168.1.50:4747/video")
-DRONE_URL = os.environ.get("DRONE_URL", "http://192.168.1.60:8080/video")
+MEDIAMTX_RTSP_URL = os.environ.get("MEDIAMTX_RTSP_URL", "rtsp://localhost:8554/matanglawin")
+MEDIAMTX_URL = os.environ.get("MEDIAMTX_URL", "http://localhost:8889")
+DRONE_URL = MEDIAMTX_RTSP_URL
 
 app = Flask(
     __name__,
@@ -92,7 +95,7 @@ detector = Detector(
 
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("dashboard.html", sources=detector.available_sources())
+    return render_template("dashboard.html", sources=detector.available_sources(), mediamtx_url=MEDIAMTX_URL)
 
 
 def _mjpeg_generator():

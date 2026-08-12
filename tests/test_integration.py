@@ -35,7 +35,12 @@ def test_all_imports():
     import inspection_db  # noqa: F401
     import report_generator  # noqa: F401
 
-    print("[PASS] All modules imported successfully")
+    # Verify letsview_source no longer exists
+    import importlib
+    letsview_spec = importlib.util.find_spec("letsview_source")
+    assert letsview_spec is None, "letsview_source module should not exist"
+
+    print("[PASS] All modules imported successfully (no letsview_source)")
     print()
 
 
@@ -74,11 +79,12 @@ def test_flask_endpoints():
             )
         print(f"  [PASS] {path}: status={r.status_code}")
 
-    # Verify dashboard does not contain dashboard-summary
+    # Verify dashboard does not contain source-selector or old LIVE FEED text
     r = c.get("/")
-    assert b"dashboard-summary" not in r.data, "Dashboard still has dashboard-summary"
+    assert b"source-selector" not in r.data, "Dashboard still has source-selector"
+    assert b"DRONE POV" in r.data, "Dashboard missing DRONE POV"
     assert b"crack-alert-banner" in r.data, "Dashboard missing crack-alert-banner"
-    print("  [PASS] Dashboard: no dashboard-summary, has crack-alert-banner")
+    print("  [PASS] Dashboard: no source-selector, has DRONE POV, has crack-alert-banner")
 
     # Verify /api/summary fields
     r = c.get("/api/summary")

@@ -1,0 +1,29 @@
+{
+  "project_type": "Python Flask web app - real-time drone crack detection system",
+  "language": "Python 3.11 (backend), vanilla JS/HTML/CSS (frontend)",
+  "build_system": "pip + requirements.txt, optional Docker",
+  "test_framework": "Custom integration test script: python tests/test_integration.py (no pytest)",
+  "build_command": "pip install -r requirements.txt (after torch CPU install)",
+  "test_command": "python tests/test_integration.py",
+  "verification_instructions": "1. Create venv and install deps. 2. Run python tests/test_integration.py. 3. Verify all modules import without errors. 4. Verify Flask endpoints return expected status codes.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "python3 -m venv venv && source venv/bin/activate && pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q && pip install -r requirements.txt -q",
+  "environment_constraints": "OPEN_INTERNET network mode. mesa-libGL already installed. No actual MediaMTX server or drone available - validation is structural/import-based. venv already exists at /projects/sandbox/Matanglawin-2.0/venv/",
+  "contribution_requirements": "Do NOT break existing features. Preserve existing architecture. Only replace the video acquisition pipeline. Keep existing crack detection, validation, capture, inspection, PDF, CSV, inspection history functional.",
+  "key_patterns": "VideoSource class interface (open/read/release/is_open). Detector uses registry dict of SourceSpec. CaptureManager state machine. annotate_frame() returns 4-tuple. inspection_db uses SQLite WAL. report_generator uses fpdf2. Frontend polls /status and /capture/status.",
+  "relevant_files": [
+    "letsview_source.py (DELETE)",
+    "video_source.py (remove letsview, keep drone/webcam/ip_camera pattern)",
+    "detector.py (remove LetsViewSource import and letsview:// branching)",
+    "app.py (update DEFAULT_SOURCE, add MEDIAMTX env vars, keep MJPEG endpoint for backend)",
+    "templates/dashboard.html (replace MJPEG img with WebRTC iframe, remove source selector, rename LIVE FEED to DRONE POV)",
+    "static/js/dashboard.js (remove source selector logic, update video reconnection for WebRTC)",
+    "inspection_db.py (add GPS columns: latitude, longitude, altitude, gps_timestamp)",
+    "capture_manager.py (add crack region cropping using bbox)",
+    "report_generator.py (add GPS to PDF and CSV)",
+    "requirements.txt (remove pywin32 reference)",
+    "gps_provider.py (NEW - GPS provider abstraction)",
+    "tests/test_integration.py (update for new architecture)"
+  ],
+  "directory_structure": "Root: app.py (Flask), detector.py (background worker), video_source.py (camera abstraction), letsview_source.py (TO DELETE), inference_core.py (YOLO), capture_manager.py (auto-capture state machine), crack_validator.py, image_quality.py, inspection_db.py (SQLite), report_generator.py (PDF/CSV/Excel), gps_provider.py (TO CREATE). templates/ (dashboard.html, inspections.html). static/ (style.css, js/dashboard.js, img/, sounds/). tests/ (test_integration.py). best.pt (YOLO model)."
+}

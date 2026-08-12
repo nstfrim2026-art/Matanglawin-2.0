@@ -1,0 +1,31 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Add GPS provider abstraction, GPS database columns, crack region cropping, and GPS-enabled reporting. This feature: (1) creates gps_provider.py with GPSProvider class, (2) adds GPS columns to inspection_db.py, (3) updates capture_manager.py to crop crack regions using bounding box, (4) updates report_generator.py PDF to include GPS location (or 'GPS data unavailable'), (5) updates CSV export to include lat/lon/alt columns, (6) updates tests to cover new functionality.",
+  "status": "pending",
+  "steps": [
+    "Create gps_provider.py with GPSProvider class. Methods: get_current_position() returns dict with latitude/longitude/altitude/timestamp (all None if unavailable), get_position_at_timestamp(timestamp) for timestamp-based GPS matching, import_gps_log(log_data) to import GPS telemetry data (list of {timestamp, latitude, longitude, altitude} dicts). Store imported GPS log in memory. Use bisect for nearest-timestamp matching with configurable tolerance (default 5 seconds). Never return fake coordinates - return None values if GPS unavailable.",
+    "In inspection_db.py: Add migration logic in init_db() to add columns: latitude REAL, longitude REAL, altitude REAL, gps_timestamp TEXT (all nullable via ALTER TABLE ADD COLUMN if not present, same pattern as existing 'notes' migration). Update insert_inspection() to accept and store these GPS fields. Update get_inspection_by_id and query functions to include GPS fields in results (they already use SELECT * so they will automatically appear).",
+    "In capture_manager.py: After crack validation passes and before saving, crop the crack region from the raw frame using the primary detection's bbox. Add configurable padding (CROP_PADDING_RATIO = 0.15 = 15% of bbox dimensions). Save the cropped image alongside the full frame (e.g., captures/crops/INSP-XXXXX_crop.jpg). Store crop_path in metadata. Pass the cropped image path to the PDF report generator.",
+    "In capture_manager.py: Instantiate GPSProvider. After a crack is confirmed, call gps_provider.get_current_position() to get GPS data. Include GPS fields (latitude, longitude, altitude, gps_timestamp) in the db_record passed to insert_inspection(). Include GPS in the metadata dict.",
+    "In report_generator.py: Update generate_pdf_report() to include a 'Location' section after the inspection details. If latitude/longitude are present and not None, display them. If GPS data is unavailable (None), display 'GPS data unavailable'. Update CSV_COLUMNS to include 'latitude', 'longitude', 'altitude'. Update generate_csv_record() and Excel export to include GPS columns. Add the cropped crack image to the PDF if crop_path is provided and file exists.",
+    "In tests/test_integration.py: Add test_gps_provider() testing GPSProvider instantiation, get_current_position() returning None values, import_gps_log() and get_position_at_timestamp() for matching. Add test for database GPS columns existing. Update test_report_generator() to test PDF with GPS data and without GPS data. Test that CSV export headers include latitude/longitude/altitude."
+  ],
+  "acceptance_criteria": [
+    "gps_provider.py exists and GPSProvider class can be instantiated",
+    "GPSProvider.get_current_position() returns {latitude: None, longitude: None, altitude: None, timestamp: None} when no GPS data available",
+    "GPSProvider.import_gps_log() accepts a list of GPS points and get_position_at_timestamp() returns nearest match within tolerance",
+    "inspection_db.py schema includes latitude, longitude, altitude, gps_timestamp columns (nullable)",
+    "capture_manager.py crops the crack region and saves it to captures/crops/",
+    "report_generator.py PDF includes GPS location or 'GPS data unavailable' message",
+    "CSV export includes latitude, longitude, altitude columns",
+    "python tests/test_integration.py passes with all new and existing tests"
+  ],
+  "verification": [
+    "Run: python tests/test_integration.py and confirm all tests pass",
+    "Run: python -c \"from gps_provider import GPSProvider; g = GPSProvider(); print(g.get_current_position())\" and confirm output shows None values",
+    "Run: python -c \"from inspection_db import init_db, _get_connection; init_db(); conn = _get_connection(); cols = [r[1] for r in conn.execute('PRAGMA table_info(inspections)').fetchall()]; print('latitude' in cols, 'longitude' in cols, 'altitude' in cols)\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

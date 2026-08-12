@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-001",
+  "type": "refactor",
+  "description": "Remove LetsView entirely and restructure the video pipeline for MediaMTX RTMP/RTSP. This feature: (1) deletes letsview_source.py, (2) removes the letsview entry from video_source.py build_registry(), (3) removes LetsViewSource import and letsview:// branching from detector.py, (4) removes pywin32 reference from requirements.txt, (5) updates video_source.py to add a 'mediamtx' source that reads from RTSP (configurable via MEDIAMTX_RTSP_URL env var, default rtsp://localhost:8554/matanglawin), (6) updates app.py to use MEDIAMTX_RTSP_URL and MEDIAMTX_URL env vars and set default source to 'drone', (7) removes the source selector UI from dashboard.html and renames 'LIVE FEED' to 'DRONE POV', (8) replaces the MJPEG img tag in dashboard.html with an iframe pointing to MediaMTX WebRTC player (MEDIAMTX_URL/matanglawin), (9) updates dashboard.js to remove source selector logic and add WebRTC iframe reconnection/error handling, (10) updates Dockerfile to remove pywin32 reference if any, (11) updates tests/test_integration.py to remove letsview import test and update source list expectations.",
+  "status": "in_progress",
+  "steps": [
+    "Delete letsview_source.py entirely",
+    "In video_source.py: remove the 'letsview' entry from build_registry(). Rename 'drone' source to use MEDIAMTX_RTSP_URL (default: rtsp://localhost:8554/matanglawin). Keep webcam and ip_camera for non-drone testing scenarios.",
+    "In detector.py: remove 'from letsview_source import LetsViewSource' import. Remove all 'if spec == \"letsview://\":' branching (both in _maybe_switch_source and _run reconnection). Always use VideoSource for all specs.",
+    "In requirements.txt: remove the pywin32 comment block (lines referencing pywin32 and Windows LetsView capture)",
+    "In app.py: add MEDIAMTX_RTSP_URL env var (default: rtsp://localhost:8554/matanglawin) and MEDIAMTX_URL env var (default: http://localhost:8889). Pass MEDIAMTX_RTSP_URL as drone_url to build_registry(). Change DEFAULT_SOURCE default to 'drone'. Pass mediamtx_url to template context.",
+    "In templates/dashboard.html: (a) Remove the source-selector div entirely. (b) Rename 'LIVE FEED' text to 'DRONE POV'. (c) Replace the MJPEG <img id='videoFeed'> with an <iframe> element pointing to the MediaMTX WebRTC player URL (use Jinja variable mediamtx_url + '/matanglawin'). Add a fallback 'STREAM DISCONNECTED' message div. Keep the threshold slider. (d) Keep the analysis panel as-is.",
+    "In static/js/dashboard.js: (a) Remove the setupSourceSelector() function and its call. (b) Remove the MJPEG reconnection logic (videoFeed.src = ...). (c) Add WebRTC iframe monitoring: detect iframe load failures and show/hide a 'STREAM DISCONNECTED' overlay. Add periodic iframe reload attempt on disconnect.",
+    "In tests/test_integration.py: (a) Remove 'import letsview_source' from test_all_imports if present or adjust to not require it. (b) Update test_flask_endpoints to not check for source-selector related content. (c) Verify the dashboard contains 'DRONE POV' text."
+  ],
+  "acceptance_criteria": [
+    "letsview_source.py no longer exists in the project",
+    "No references to 'letsview', 'LetsView', or 'LetsViewSource' remain in any Python source file",
+    "No references to 'pywin32' or 'win32gui' remain in requirements.txt",
+    "video_source.py build_registry() returns entries for webcam, ip_camera, and drone (no letsview)",
+    "detector.py imports only VideoSource from video_source (no LetsViewSource)",
+    "dashboard.html contains 'DRONE POV' instead of 'LIVE FEED'",
+    "dashboard.html has an iframe for WebRTC playback, not an MJPEG img tag for the main video",
+    "dashboard.html does NOT contain a source-selector div",
+    "app.py reads MEDIAMTX_RTSP_URL and MEDIAMTX_URL from environment",
+    "python tests/test_integration.py passes without errors"
+  ],
+  "verification": [
+    "Run: python tests/test_integration.py and confirm all tests pass",
+    "Run: grep -r 'letsview' /projects/sandbox/Matanglawin-2.0/ --include='*.py' --include='*.html' --include='*.js' --include='*.txt' and confirm no matches (except possibly .agents/ task files)",
+    "Run: python -c 'import video_source; r = video_source.build_registry(\"x\",\"y\"); print(list(r.keys()))' and confirm no 'letsview' key"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

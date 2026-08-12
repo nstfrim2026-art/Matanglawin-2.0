@@ -1,0 +1,7 @@
+{
+  "task_id": "task-drone-pov-rtmp-mediamtx",
+  "task_description": "Replace the LetsView screen-mirroring video pipeline with a direct RTMP -> MediaMTX -> WebRTC pipeline. Remove all LetsView code. Update the dashboard to show DRONE POV via WebRTC iframe from MediaMTX. Add GPS provider abstraction, GPS database columns, crack region cropping, and GPS-enabled PDF/CSV reporting.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

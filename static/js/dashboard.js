@@ -27,10 +27,10 @@
   var liveDot = document.getElementById("liveDot");
   var analysisStatus = document.getElementById("analysisStatus");
   var analysisContent = document.getElementById("analysisContent");
-  var sourceOptions = document.getElementById("sourceOptions");
   var navToggle = document.getElementById("navToggle");
   var navLinks = document.querySelectorAll(".nav-link");
-  var videoFeed = document.getElementById("videoFeed");
+  var droneStream = document.getElementById("droneStream");
+  var streamDisconnected = document.getElementById("streamDisconnected");
   var crackAlertBanner = document.getElementById("crackAlertBanner");
 
   var loadingDismissed = false;
@@ -185,10 +185,6 @@
     var cameraConnected = Boolean(data.camera_connected);
     var crackPresent = Boolean(data.crack_present);
 
-    // Reconnect MJPEG feed when camera recovers
-    if (cameraConnected && !cameraWasConnected && videoFeed) {
-      videoFeed.src = "/video_feed?" + Date.now();
-    }
     cameraWasConnected = cameraConnected;
 
     // Live indicator
@@ -381,25 +377,59 @@
   }
 
   // -----------------------------------------------------------------------
-  // Camera source selector
+  // WebRTC iframe stream monitoring
   // -----------------------------------------------------------------------
 
-  function setupSourceSelector() {
-    if (!sourceOptions) return;
-    sourceOptions.addEventListener("change", async function (event) {
-      var target = event.target;
-      if (target && target.name === "source") {
-        try {
-          await fetch("/set_source", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ source: target.value }),
-          });
-        } catch (err) {
-          /* ignore */
-        }
+  var STREAM_RETRY_MS = 5000;
+  var _streamRetryTimer = null;
+  var _streamConnected = false;
+
+  function setupStreamMonitor() {
+    if (!droneStream) return;
+
+    droneStream.addEventListener("load", function () {
+      _streamConnected = true;
+      if (streamDisconnected) streamDisconnected.style.display = "none";
+      if (_streamRetryTimer) {
+        clearInterval(_streamRetryTimer);
+        _streamRetryTimer = null;
       }
     });
+
+    droneStream.addEventListener("error", function () {
+      showStreamDisconnected();
+    });
+
+    // Periodic check: if iframe fails to load, show overlay and retry
+    _streamRetryTimer = setInterval(function () {
+      if (!_streamConnected) {
+        showStreamDisconnected();
+        reloadStream();
+      }
+    }, STREAM_RETRY_MS);
+
+    // Initial load timeout: if not loaded within 5s, assume disconnected
+    setTimeout(function () {
+      if (!_streamConnected) {
+        showStreamDisconnected();
+      }
+    }, STREAM_RETRY_MS);
+  }
+
+  function showStreamDisconnected() {
+    _streamConnected = false;
+    if (streamDisconnected) streamDisconnected.style.display = "flex";
+    if (!_streamRetryTimer) {
+      _streamRetryTimer = setInterval(function () {
+        reloadStream();
+      }, STREAM_RETRY_MS);
+    }
+  }
+
+  function reloadStream() {
+    if (!droneStream) return;
+    var baseSrc = droneStream.src.split("?")[0];
+    droneStream.src = baseSrc + "?t=" + Date.now();
   }
 
   // -----------------------------------------------------------------------
@@ -444,7 +474,7 @@
   function init() {
     AudioManager.init();
     setupSmoothScroll();
-    setupSourceSelector();
+    setupStreamMonitor();
     setupThresholdSlider();
     setupMobileNav();
 

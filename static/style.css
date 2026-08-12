@@ -560,6 +560,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
 .live-feed-img {
@@ -567,6 +568,30 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.live-feed-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+.stream-disconnected-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(20, 18, 16, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  z-index: 5;
 }
 
 .source-selector {

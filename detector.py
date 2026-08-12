@@ -26,7 +26,6 @@ import cv2
 
 from capture_manager import CaptureManager
 from inference_core import annotate_frame
-from letsview_source import LetsViewSource
 from video_source import VideoSource, placeholder_frame
 
 
@@ -128,10 +127,7 @@ class Detector:
                         now = time.monotonic()
                         if now >= reconnect_cooldown:
                             spec = self._registry[current_key].spec
-                            if spec == "letsview://":
-                                vs = LetsViewSource()
-                            else:
-                                vs = VideoSource(spec)
+                            vs = VideoSource(spec)
 
                             if vs.open():
                                 self._video_source = vs
@@ -219,12 +215,8 @@ class Detector:
 
         spec = self._registry[pending].spec
 
-        # Use LetsViewSource for the LetsView screen capture source;
-        # otherwise use the standard OpenCV-based VideoSource.
-        if spec == "letsview://":
-            vs = LetsViewSource()
-        else:
-            vs = VideoSource(spec)
+        # Use the standard OpenCV-based VideoSource for all specs.
+        vs = VideoSource(spec)
 
         opened = vs.open()
 
