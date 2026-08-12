@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Create network_config.py module for LAN IP auto-detection, RTMP address generation, and MediaMTX reachability checks. Remove the hardcoded IP_CAMERA_URL default from app.py. Add GET /api/network endpoint to app.py. Wire the network config into the application startup.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Create network_config.py in the project root with: (a) detect_lan_ip() function using socket.socket(AF_INET, SOCK_DGRAM) connect to 8.8.8.8:80 pattern for cross-platform LAN IP detection. Must filter out 127.x.x.x and 169.254.x.x. (b) Support MATANGLAWIN_HOST_IP env var override - if set, use that instead of auto-detection. (c) Support MATANGLAWIN_STREAM_KEY env var (default: 'matanglawin'). (d) get_rtmp_address() function that returns rtmp://<detected-ip>:1935/<stream_key>. (e) get_network_info() function returning dict with host_ip, rtmp_address, stream_key, rtsp_url (always rtsp://localhost:8554/<stream_key>), webrtc_url (from MEDIAMTX_URL env var). (f) check_mediamtx_reachable() function that does a TCP port check on localhost:8554 and localhost:8889 with short timeout (1-2s). (g) get_stream_status() that checks if MediaMTX is reachable and returns connectivity info.",
     "In app.py: (a) Import network_config module. (b) Remove the hardcoded default 'http://192.168.1.50:4747/video' from IP_CAMERA_URL - change to empty string or None default (the IP camera source is only used when explicitly configured via env var). (c) Add GET /api/network route that calls network_config.get_network_info() and also includes mediamtx_reachable status from check_mediamtx_reachable(). (d) Pass stream_key to MEDIAMTX_RTSP_URL construction so it uses the dynamic stream key.",
@@ -24,5 +24,5 @@
     "Run: grep -rn '192\\.168\\.' *.py | grep -v '#' | grep -v 'README\\|DEPLOY' and confirm no results from runtime code"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All verification passed. network_config.py imports cleanly, /api/network returns correct JSON with all required keys, MATANGLAWIN_HOST_IP override works, MATANGLAWIN_STREAM_KEY override works, no hardcoded 192.168.x IPs remain in runtime code. In the sandbox environment, detect_lan_ip() returns None (no real LAN), so fallback to 127.0.0.1 works correctly. All 60+ integration tests still pass."
 }
