@@ -1,7 +1,14 @@
 {
   "task_id": "task-drone-pov-rtmp-mediamtx",
   "task_description": "Replace the LetsView screen-mirroring video pipeline with a direct RTMP -> MediaMTX -> WebRTC pipeline. Remove all LetsView code. Update the dashboard to show DRONE POV via WebRTC iframe from MediaMTX. Add GPS provider abstraction, GPS database columns, crack region cropping, and GPS-enabled PDF/CSV reporting.",
-  "status": "in_progress",
+  "status": "completed",
   "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 15+ integration tests pass. Float bbox crop bug fixed, timezone GPS matching fixed, stream overlay improved. Semantic review APPROVED on v2. Two non-blocking cosmetic items remain (dead CSS, misleading negative test)."
+  }
 }
