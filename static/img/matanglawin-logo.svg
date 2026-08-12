@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  matanglawin-logo.svg - PLACEHOLDER stand-in for the official MatanglaWIN
+  logo, matching its visual identity (red drone reticle + hawk eye +
+  MATANGLAWIN wordmark) so the dark UI is never broken.
+
+  >>> Drop the official logo file at  static/img/matanglawin-logo.png  <<<
+  The site prefers that PNG automatically (see base.html) and falls back
+  to this SVG only if the PNG is absent.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 250" role="img" aria-label="MatanglaWIN">
+  <defs>
+    <style>
+      .r { fill: none; stroke: #e21b1b; stroke-width: 7; }
+      .f { fill: #e21b1b; }
+    </style>
+  </defs>
+
+  <!-- outer reticle ring, broken at the 4 cardinal points for the props -->
+  <g class="r" stroke-linecap="round">
+    <path d="M 70 30 A 80 80 0 0 0 30 70" />
+    <path d="M 150 30 A 80 80 0 0 1 190 70" />
+    <path d="M 190 150 A 80 80 0 0 1 150 190" />
+    <path d="M 70 190 A 80 80 0 0 1 30 150" />
+  </g>
+
+  <!-- four propellers (N, E, S, W) -->
+  <g class="f">
+    <g transform="translate(110 22)">
+      <ellipse cx="0" cy="-13" rx="4.5" ry="12"/>
+      <ellipse cx="0" cy="13" rx="4.5" ry="12"/>
+      <circle cx="0" cy="0" r="5"/>
+    </g>
+    <g transform="translate(198 110) rotate(90)">
+      <ellipse cx="0" cy="-13" rx="4.5" ry="12"/>
+      <ellipse cx="0" cy="13" rx="4.5" ry="12"/>
+      <circle cx="0" cy="0" r="5"/>
+    </g>
+    <g transform="translate(110 198)">
+      <ellipse cx="0" cy="-13" rx="4.5" ry="12"/>
+      <ellipse cx="0" cy="13" rx="4.5" ry="12"/>
+      <circle cx="0" cy="0" r="5"/>
+    </g>
+    <g transform="translate(22 110) rotate(90)">
+      <ellipse cx="0" cy="-13" rx="4.5" ry="12"/>
+      <ellipse cx="0" cy="13" rx="4.5" ry="12"/>
+      <circle cx="0" cy="0" r="5"/>
+    </g>
+  </g>
+
+  <!-- stylized hawk eye in the centre -->
+  <g class="f">
+    <path d="M 55 112 C 80 82, 150 82, 178 96 C 150 90, 96 100, 70 122
+             C 62 120, 57 117, 55 112 Z"/>
+    <circle cx="103" cy="108" r="22" fill="none" stroke="#e21b1b" stroke-width="7"/>
+    <circle cx="103" cy="108" r="8"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="110" y="238" text-anchor="middle" fill="#e21b1b"
+        font-family="Segoe UI, Arial, sans-serif" font-size="30"
+        font-weight="700" letter-spacing="1.5">MATANGLAWIN</text>
+</svg>

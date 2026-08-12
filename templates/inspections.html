@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% set active_nav = 'inspections' %}
+{% block title %}MatanglaWIN - Inspection History{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <h1>Inspection History</h1>
+      <p class="lede">Every photo inspection &mdash; automatic DJI import or manual upload &mdash; with its result.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Recorded Inspections</h2>
+      <span id="inspections-count" class="auto-note"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="inspections-table" id="inspections-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Timestamp</th>
+            <th>Photo</th>
+            <th>Status</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="inspections-body">
+          <tr><td colspan="5" class="hint">Loading inspections&hellip;</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p id="inspections-empty" class="hint" style="display:none;">No inspections recorded yet.</p>
+  </section>
+
+  <script>
+    async function loadInspections() {
+      const body = document.getElementById('inspections-body');
+      const emptyMsg = document.getElementById('inspections-empty');
+      const count = document.getElementById('inspections-count');
+      try {
+        const res = await fetch('/api/inspections?limit=200');
+        const data = await res.json();
+        const items = data.inspections || [];
+        count.textContent = (data.count || 0) + ' total';
+        if (items.length === 0) {
+          body.innerHTML = '';
+          emptyMsg.style.display = 'block';
+          return;
+        }
+        emptyMsg.style.display = 'none';
+        body.innerHTML = items.map((it) => {
+          const urls = it.urls || {};
+          const thumb = (it.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
+          const statusClass = it.has_crack ? 'status-pill-crack' : 'status-pill-ok';
+          return `
+            <tr>
+              <td>${it.id}</td>
+              <td>${it.timestamp}</td>
+              <td><a href="/inspection/${it.id}"><img src="${thumb}" alt="inspection ${it.id}" class="thumb"></a></td>
+              <td><span class="status-pill ${statusClass}">${it.status}</span></td>
+              <td>${it.source_label}</td>
+            </tr>`;
+        }).join('');
+      } catch (err) {
+        body.innerHTML = `<tr><td colspan="5" class="hint">Failed to load inspections: ${err}</td></tr>`;
+      }
+    }
+
+    loadInspections();
+    setInterval(loadInspections, 5000);
+  </script>
+{% endblock %}

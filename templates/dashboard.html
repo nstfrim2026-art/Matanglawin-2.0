@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% set active_nav = 'dashboard' %}
+{% block title %}MatanglaWIN - Live Inspection Dashboard{% endblock %}
+{% block content %}
+  <section class="page-head">
+    <div>
+      <h1>Live Inspection Dashboard</h1>
+      <p class="lede">
+        Monitor the clean DJI&nbsp;Neo&nbsp;2 point-of-view and review the latest photo
+        inspection. Press the shutter on the controller &mdash; the captured photo is
+        transferred, analyzed, and shown below automatically. No upload, no Analyze button.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ PIPELINE A: display-only live drone POV ============ -->
+  <section class="panel pov-panel">
+    <div class="panel-head">
+      <h2>Live Drone POV</h2>
+      <span id="stream-badge" class="badge badge-connecting">UNKNOWN</span>
+    </div>
+    <div class="pov-stage" id="pov-frame">
+      <div id="pov-placeholder" class="pov-placeholder">
+        <div class="pov-placeholder-inner">
+          <span class="pov-eye">&#128065;</span>
+          <p class="pov-title">Awaiting live drone feed</p>
+          <p class="hint">
+            Served directly by MediaMTX over WebRTC &mdash; no OBS, VLC, or screen mirroring,
+            and never any AI overlay, mask, or box on the live view.
+          </p>
+        </div>
+      </div>
+      <iframe id="pov-iframe" class="pov-iframe" title="Live drone POV"
+              allow="autoplay; fullscreen" style="display:none;"></iframe>
+    </div>
+    <p class="pov-caption">
+      Use the DJI controller shutter button to capture an inspection photo. The live view is
+      for monitoring only &mdash; cracks are analyzed per captured still, never on this feed.
+    </p>
+  </section>
+
+  <!-- ============ PIPELINE B: latest automatic photo inspection ============ -->
+  <section class="panel latest-panel">
+    <div class="panel-head">
+      <h2>Latest Inspection</h2>
+      <span id="latest-live-note" class="auto-note">Updating automatically&hellip;</span>
+    </div>
+
+    <div id="latest-toast" class="latest-toast" style="display:none;"></div>
+
+    <div id="latest-empty" class="empty-state">
+      <p>No inspection yet.</p>
+      <p class="hint">Capture a photo with the drone, or use Manual Upload for testing.</p>
+    </div>
+
+    <div id="latest-content" class="latest-layout" style="display:none;">
+      <div class="latest-status-col">
+        <div class="status-banner" id="latest-status">&mdash;</div>
+        <dl class="meta-list">
+          <div><dt>Captured</dt><dd id="latest-timestamp">&mdash;</dd></div>
+          <div><dt>Source</dt><dd id="latest-source">&mdash;</dd></div>
+        </dl>
+        <a id="latest-view" class="btn-secondary" href="#">Open full result</a>
+      </div>
+
+      <div class="latest-images" id="latest-images">
+        <figure class="shot">
+          <figcaption>Original photo</figcaption>
+          <img id="latest-original" class="shot-img" alt="Original photo">
+        </figure>
+        <figure class="shot" id="latest-highlighted-col" style="display:none;">
+          <figcaption>Red-highlighted</figcaption>
+          <img id="latest-highlighted" class="shot-img" alt="Crack highlighted photo">
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Live-feed connection (dynamic, no source edits) ============ -->
+  <section class="panel net-panel">
+    <div class="panel-head">
+      <h2>Live Feed Connection</h2>
+      <a class="btn-secondary btn-small" href="{{ url_for('api_mediamtx_config') }}">Download mediamtx.yml</a>
+    </div>
+    <div class="net-grid">
+      <div class="net-item"><span class="net-label">This PC IP</span><span class="net-value" id="net-host-ip">&mdash;</span></div>
+      <div class="net-item"><span class="net-label">DJI RTMP address</span><span class="net-value" id="net-rtmp-address">&mdash;</span></div>
+      <div class="net-item"><span class="net-label">Stream key</span><span class="net-value" id="net-stream-key">&mdash;</span></div>
+      <div class="net-item"><span class="net-label">MediaMTX</span><span class="net-value" id="net-mediamtx">&mdash;</span></div>
+    </div>
+    <p class="hint">
+      Enter the RTMP address and stream key above into DJI&nbsp;Fly&rsquo;s live-stream (RTMP) setting.
+      These values follow the PC&rsquo;s current network automatically &mdash; you never edit any source
+      code, even when switching Wi-Fi. Override detection with the <code>MATANGLAWIN_HOST_IP</code>
+      environment variable if needed.
+    </p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+{% endblock %}

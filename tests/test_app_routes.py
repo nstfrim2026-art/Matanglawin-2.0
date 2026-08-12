@@ -1,0 +1,197 @@
+"""
+Tests for app.py routes.
+
+Each test gets an isolated data dir (via monkeypatching app globals) and a
+stubbed YOLO (via inference_core.predict_masks) so no real model or network
+is needed, and detection is deterministic.
+"""
+
+import io
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import inference_core  # noqa: E402
+from tests import stubs  # noqa: E402
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    import app as appmod
+
+    monkeypatch.setattr(appmod, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(appmod, "UPLOAD_TMP_DIR", tmp_path / "upload_tmp")
+    monkeypatch.setattr(appmod, "INSPECTIONS_DIR", tmp_path / "inspections")
+    monkeypatch.setattr(appmod, "IMPORT_DIR", tmp_path / "import")
+    monkeypatch.setattr(appmod, "DB_PATH", tmp_path / "inspections.db")
+    for attr in ["UPLOAD_TMP_DIR", "INSPECTIONS_DIR", "IMPORT_DIR"]:
+        getattr(appmod, attr).mkdir(parents=True, exist_ok=True)
+
+    # reset lazy singletons for a clean slate
+    monkeypatch.setattr(appmod, "_db", None)
+    monkeypatch.setattr(appmod, "_service", None)
+    monkeypatch.setattr(appmod, "_watcher", None)
+
+    stubs.stub_no_crack(inference_core)
+    appmod.app.config["TESTING"] = True
+    with appmod.app.test_client() as c:
+        yield c
+
+
+# -- pages ------------------------------------------------------------
+
+def test_dashboard_is_the_main_page(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert b"Live Drone POV" in resp.data
+    assert b"Latest Inspection" in resp.data
+
+
+def test_dashboard_pov_is_clean_display_only(client):
+    resp = client.get("/")
+    body = resp.data.decode()
+    # The live POV explicitly states no AI overlay, and there is no
+    # bounding-box / confidence / FPS language anywhere on the page.
+    assert "shutter button" in body
+    for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only"):
+        assert banned.lower() not in body.lower()
+
+
+def test_dashboard_alias(client):
+    assert client.get("/dashboard").status_code == 200
+
+
+def test_upload_fallback_page_renders_and_is_labelled_fallback(client):
+    resp = client.get("/upload")
+    assert resp.status_code == 200
+    assert b"Manual Upload" in resp.data
+    assert b"Fallback" in resp.data
+
+
+def test_inspections_page_renders(client):
+    resp = client.get("/inspections")
+    assert resp.status_code == 200
+    assert b"Recorded Inspections" in resp.data
+
+
+# -- network / stream APIs -------------------------------------------
+
+def test_api_network_shape(client):
+    data = client.get("/api/network").get_json()
+    assert "host_ip" in data
+    assert data["rtsp_url"].startswith("rtsp://localhost:")
+
+
+def test_api_network_reflects_dynamic_ip_override(client, monkeypatch):
+    monkeypatch.setenv("MATANGLAWIN_HOST_IP", "172.20.10.3")  # example test value
+    data = client.get("/api/network").get_json()
+    assert data["host_ip"] == "172.20.10.3"
+    assert data["rtmp_address"] == "rtmp://172.20.10.3:1935"
+
+
+def test_api_stream_status_display_only_never_crashes(client):
+    data = client.get("/api/stream/status").get_json()
+    assert data["pov_state"] in ("LIVE", "OFFLINE", "UNKNOWN")
+
+
+def test_api_mediamtx_config_downloads_yaml(client, monkeypatch):
+    monkeypatch.setenv("MATANGLAWIN_HOST_IP", "10.0.0.9")  # example test value
+    resp = client.get("/api/mediamtx/config")
+    assert resp.status_code == 200
+    assert b"rtmpAddress" in resp.data
+    assert b"attachment" in resp.headers.get("Content-Disposition", "").encode()
+
+
+def test_api_inspections_empty_initially(client):
+    data = client.get("/api/inspections").get_json()
+    assert data["count"] == 0 and data["inspections"] == []
+
+
+def test_api_latest_null_initially(client):
+    assert client.get("/api/inspection/latest").get_json() is None
+
+
+# -- analysis flow ----------------------------------------------------
+
+def test_upload_no_crack_flow(client):
+    stubs.stub_no_crack(inference_core)
+    resp = client.post(
+        "/detect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    page = client.get(resp.headers["Location"])
+    assert page.status_code == 200
+    assert b"NO CRACK DETECTED" in page.data
+    # No red-highlighted figure caption is shown for a no-crack result.
+    assert b"Red-highlighted" not in page.data
+
+
+def test_api_inspect_crack_flow_serves_only_two_images(client):
+    stubs.stub_one_crack(inference_core)
+    j = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    assert j["status"] == "CRACK DETECTED"
+    # Never leak prohibited fields.
+    for banned in ("confidence", "num_instances", "crack_image_names",
+                   "latitude", "longitude", "fps"):
+        assert banned not in j
+    urls = j["urls"]
+    assert set(urls.keys()) == {"original", "highlighted"}  # no 'cracks'
+    assert client.get(urls["original"]).status_code == 200
+    assert client.get(urls["highlighted"]).status_code == 200
+
+
+def test_result_page_crack_shows_both_images(client):
+    stubs.stub_one_crack(inference_core)
+    j = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    ).get_json()
+    page = client.get(f"/inspection/{j['id']}")
+    assert page.status_code == 200
+    assert b"CRACK DETECTED" in page.data
+    assert b"Original photo" in page.data
+    assert b"Red-highlighted" in page.data
+
+
+def test_api_inspect_rejects_non_image(client):
+    resp = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(b"not an image"), "t.txt")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+
+
+def test_upload_missing_file_redirects(client):
+    resp = client.post("/detect", data={}, content_type="multipart/form-data")
+    assert resp.status_code in (302, 303)
+
+
+# -- prohibited surfaces are absent ----------------------------------
+
+def test_no_crack_only_or_report_routes_exist(client):
+    import app as appmod
+    rules = [str(r) for r in appmod.app.url_map.iter_rules()]
+    assert not any("/crack/" in r or r.endswith("/crack") for r in rules)
+    assert not any("report" in r for r in rules)
+    assert not any("gps" in r for r in rules)
+    assert not any("preview" in r for r in rules)
+    # crack-only image route must 404 (it does not exist).
+    stubs.stub_one_crack(inference_core)
+    j = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    ).get_json()
+    assert client.get(f"/api/inspection/{j['id']}/crack/crack_001.png").status_code == 404

@@ -4,6 +4,16 @@ opencv-python-headless>=4.9
 numpy>=1.26
 werkzeug>=3.0
 
+# The live drone POV (Pipeline A) is served straight from MediaMTX over
+# WebRTC to the browser; MediaMTX is a separate, standalone binary you run
+# alongside this app (see README) - it is NOT a pip dependency. The photo
+# ingestion bridge (photo_import.py) and dynamic network configuration
+# (network_config.py) use only the Python standard library.
+
+# --- Development / test-only dependencies (not required to run the app) ---
+# pip install pytest
+#   pytest
+
 # NOTE: `ultralytics` depends on `torch`/`torchvision`. On a fresh install,
 # pip may pull the CUDA-enabled build of torch, which is several GB in size
 # and unnecessary for CPU-only inference on a single image. To keep the

@@ -1,49 +1,34 @@
 {% extends "base.html" %}
-{% block title %}Matanglawin - Upload Image{% endblock %}
+{% set active_nav = 'upload' %}
+{% block title %}MatanglaWIN - Manual Upload (Fallback){% endblock %}
 {% block content %}
-  <section class="hero">
-    <h1>Detect surface cracks in one click</h1>
-    <p>
-      Upload a photo of a road, wall, or structure and Matanglawin will
-      highlight every crack it finds using a semi-transparent mask that
-      follows the exact crack shape &mdash; no bounding boxes, just the
-      true outline.
-    </p>
+  <section class="page-head">
+    <div>
+      <h1>Manual Upload <span class="fallback-tag">Fallback / Testing</span></h1>
+      <p class="lede">
+        The normal workflow is fully automatic: capture a photo with the DJI&nbsp;Neo&nbsp;2 and it is
+        analyzed on arrival. This page is only a manual fallback for testing or when no drone
+        transfer is available. It runs the exact same analysis pipeline.
+      </p>
+    </div>
   </section>
 
-  <section class="card">
+  <section class="panel upload-panel">
     <form action="{{ url_for('detect') }}" method="post" enctype="multipart/form-data" class="upload-form">
       <div class="dropzone" id="dropzone">
-        <input type="file" name="image" id="fileInput" accept=".jpg,.jpeg,.png,.bmp,.tif,.tiff,.webp" required>
+        <input type="file" name="image" id="fileInput"
+               accept=".jpg,.jpeg,.png,.bmp,.tif,.tiff,.webp" required>
         <div class="dropzone-content">
           <span class="dropzone-icon">&#8593;</span>
-          <p><strong>Click to choose an image</strong> or drag &amp; drop it here</p>
-          <p class="hint">JPG, PNG, BMP, TIF, WEBP &middot; up to 16MB</p>
+          <p><strong>Click to choose a photo</strong> or drag &amp; drop it here</p>
+          <p class="hint">JPG, PNG, BMP, TIF, WEBP &middot; up to 16&nbsp;MB</p>
           <p class="filename" id="fileName"></p>
         </div>
       </div>
 
       <img id="preview" class="preview-img" alt="" style="display:none;">
 
-      <details class="advanced">
-        <summary>Advanced options</summary>
-        <div class="advanced-grid">
-          <label>
-            Confidence threshold
-            <input type="number" name="conf" min="0" max="1" step="0.05" value="0.25">
-          </label>
-          <label>
-            Mask opacity
-            <input type="number" name="alpha" min="0" max="1" step="0.05" value="0.5">
-          </label>
-          <label>
-            Outline thickness (px)
-            <input type="number" name="outline" min="0" max="10" step="1" value="2">
-          </label>
-        </div>
-      </details>
-
-      <button type="submit" class="btn-primary">Detect Cracks</button>
+      <button type="submit" class="btn-primary">Analyze photo</button>
     </form>
   </section>
 
