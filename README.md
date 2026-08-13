@@ -183,34 +183,59 @@ detection-only contrast boost (CLAHE + unsharp) helps faint cracks stand
 out — applied only to the model's input, never to the stored/displayed
 original, and never to the live POV.
 
-All knobs are environment variables (no code edits, nothing shown in the
-UI):
+Detection is balanced between **recall** (find the faint/thin crack) and
+**precision** (don't paint wall texture, stains, or shadows). A real crack
+is thin, long, and connected; typical false positives are short dashes or
+compact blobs — so a shape filter keeps crack-like shapes and rejects the
+rest. All knobs are environment variables (no code edits, nothing shown in
+the UI):
 
 ```
-MATANGLAWIN_CONF=0.15          # detection threshold (lower = more sensitive)
-MATANGLAWIN_IMGSZ=1280         # whole-image inference size
-MATANGLAWIN_MIN_AREA_PX=40     # noise floor (mask pixels)
-MATANGLAWIN_TILED=1            # tiled/sliced inference on/off (biggest win)
-MATANGLAWIN_TILE=1024          # tile size in px (try 640 for very thin cracks)
-MATANGLAWIN_TILE_OVERLAP=0.2   # tile overlap fraction
-MATANGLAWIN_ENHANCE=1          # CLAHE+unsharp on the analysis copy only
-MATANGLAWIN_AUGMENT=0          # test-time augmentation (extra recall, slower)
+# recall (find faint/thin cracks)
+MATANGLAWIN_CONF=0.20           # detection threshold (lower = more sensitive)
+MATANGLAWIN_IMGSZ=1280          # whole-image inference size
+MATANGLAWIN_TILED=1             # tiled/sliced inference on/off (biggest recall win)
+MATANGLAWIN_TILE=1024           # tile size in px (try 640 for the thinnest cracks)
+MATANGLAWIN_TILE_OVERLAP=0.2    # tile overlap fraction
+MATANGLAWIN_ENHANCE=1           # contrast-boost the analysis copy only
+MATANGLAWIN_CLAHE_CLIP=1.5      # enhancement strength (higher = stronger, more texture)
+MATANGLAWIN_UNSHARP=0           # add unsharp mask (more recall, more false edges)
+MATANGLAWIN_AUGMENT=0           # test-time augmentation (extra recall, slower)
+
+# precision (reject non-crack detections)
+MATANGLAWIN_MIN_AREA_PX=60      # drop specks below this many mask pixels
+MATANGLAWIN_MIN_THINNESS=3.0    # reject compact blobs (disk ~= 1.0; long crack >> 1)
+MATANGLAWIN_MIN_LENGTH_FRAC=0.05  # drop fragments shorter than 5% of the long side
 ```
 
-Measured on the real `best.pt` with a faint ~1px crack in a 1600×2400
-image: the old whole-image path (conf 0.25, imgsz 640) detected **0** crack
-pixels, and even imgsz 1280 + enhancement still missed it — while tiled +
-enhancement recovered it (~13k crack pixels). Tiling was the decisive
-factor. Smaller tiles (e.g. `MATANGLAWIN_TILE=640`) recover the thinnest
-cracks best, at the cost of more tiles/time per photo.
+Measured on the real `best.pt`:
 
-Trade-offs: lower `conf` and tiling raise recall but can add occasional
-false positives on plain wall texture, shadows, or edges — tune `conf` on a
-few of your own photos. Tiling costs seconds per photo; that is fine here
-because it is **still-photo** analysis and never touches the live POV.
-Use the **Manual Upload** page to re-run one photo and compare settings
-quickly. If thin cracks are *still* missed after tuning, that is when more
-training data (native-resolution hairline-crack crops) becomes the answer.
+- **Recall** — a faint ~1px crack in a 1600×2400 image: the old whole-image
+  path (conf 0.25, imgsz 640) detected **0** crack pixels; tiling recovered
+  it. Tiling is the decisive factor; `MATANGLAWIN_TILE=640` recovers the
+  thinnest cracks best (more tiles/time).
+- **Precision** — a textured wall with one real crack plus 9 stains/dashes:
+  without the shape filter the model returned **10** detections (crack + 9
+  false positives); with the shape filter it returned **1** — only the real
+  crack, its mask essentially unchanged.
+
+Tuning guidance (use the **Manual Upload** page to A/B one photo quickly):
+
+- Over-detecting (texture/stains marked red)? Raise `MATANGLAWIN_CONF`
+  (e.g. 0.30), raise `MATANGLAWIN_MIN_THINNESS` (e.g. 4–5), raise
+  `MATANGLAWIN_MIN_LENGTH_FRAC` (e.g. 0.08), lower `MATANGLAWIN_CLAHE_CLIP`,
+  keep `MATANGLAWIN_UNSHARP=0`.
+- Missing faint/short cracks? Lower `MATANGLAWIN_CONF` (e.g. 0.12), lower
+  `MATANGLAWIN_MIN_LENGTH_FRAC` (e.g. 0.02) and `MATANGLAWIN_MIN_THINNESS`
+  (e.g. 2), set `MATANGLAWIN_TILE=640`, enable `MATANGLAWIN_UNSHARP=1`.
+  Setting `MATANGLAWIN_MIN_THINNESS=0` and `MATANGLAWIN_MIN_LENGTH_FRAC=0`
+  disables the shape filter entirely.
+
+Note the default `MIN_LENGTH_FRAC=0.05` also drops genuine *short* secondary
+cracks; lower it if you need those. Tiling costs seconds per photo, which is
+fine for **still-photo** analysis and never touches the live POV. If cracks
+are still missed after tuning, that is when more training data
+(native-resolution hairline crops) becomes the real answer.
 
 ---
 

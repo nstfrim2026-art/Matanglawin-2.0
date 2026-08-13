@@ -75,13 +75,17 @@ import network_config
 from bridge_status import BridgeStatus
 from detector import (
     DEFAULT_AUGMENT,
+    DEFAULT_CLAHE_CLIP,
     DEFAULT_CONF,
     DEFAULT_ENHANCE,
     DEFAULT_IMGSZ,
     DEFAULT_MIN_AREA_PX,
+    DEFAULT_MIN_LENGTH_FRAC,
+    DEFAULT_MIN_THINNESS,
     DEFAULT_TILE,
     DEFAULT_TILE_OVERLAP,
     DEFAULT_TILED,
+    DEFAULT_UNSHARP,
 )
 from import_ledger import ImportLedger, hash_bytes
 from inference_core import get_model
@@ -137,14 +141,20 @@ def allowed_file(filename: str) -> bool:
 # They only affect what the model looks at - never the stored/displayed
 # original, the live POV, or the (metric-free) result UI.
 #
-#   MATANGLAWIN_CONF          detection threshold        (default 0.15)
-#   MATANGLAWIN_IMGSZ         whole-image inference size (default 1280)
-#   MATANGLAWIN_MIN_AREA_PX   noise floor in mask px     (default 40)
-#   MATANGLAWIN_TILED         tiled/sliced inference 1/0 (default 1)
-#   MATANGLAWIN_TILE          tile size in px            (default 1024)
-#   MATANGLAWIN_TILE_OVERLAP  tile overlap fraction      (default 0.2)
-#   MATANGLAWIN_ENHANCE       CLAHE+unsharp on input 1/0 (default 1)
-#   MATANGLAWIN_AUGMENT       test-time augmentation 1/0 (default 0)
+#   Recall (find faint/thin cracks):
+#     MATANGLAWIN_CONF          detection threshold        (default 0.20)
+#     MATANGLAWIN_IMGSZ         whole-image inference size (default 1280)
+#     MATANGLAWIN_TILED         tiled/sliced inference 1/0 (default 1)
+#     MATANGLAWIN_TILE          tile size in px            (default 1024)
+#     MATANGLAWIN_TILE_OVERLAP  tile overlap fraction      (default 0.2)
+#     MATANGLAWIN_ENHANCE       enhance input 1/0          (default 1)
+#     MATANGLAWIN_CLAHE_CLIP    CLAHE clip limit           (default 1.5)
+#     MATANGLAWIN_UNSHARP       unsharp mask 1/0           (default 0)
+#     MATANGLAWIN_AUGMENT       test-time augmentation 1/0 (default 0)
+#   Precision (don't paint texture/stains as cracks):
+#     MATANGLAWIN_MIN_AREA_PX     noise floor in mask px       (default 60)
+#     MATANGLAWIN_MIN_THINNESS    reject compact blobs         (default 3.0)
+#     MATANGLAWIN_MIN_LENGTH_FRAC drop short fragments (frac)  (default 0.05)
 # ---------------------------------------------------------------------------
 def _env_float(name: str, default: float) -> float:
     try:
@@ -178,6 +188,10 @@ def detector_config() -> dict:
         "tile_overlap": _env_float("MATANGLAWIN_TILE_OVERLAP", DEFAULT_TILE_OVERLAP),
         "enhance": _env_bool("MATANGLAWIN_ENHANCE", DEFAULT_ENHANCE),
         "augment": _env_bool("MATANGLAWIN_AUGMENT", DEFAULT_AUGMENT),
+        "clahe_clip": _env_float("MATANGLAWIN_CLAHE_CLIP", DEFAULT_CLAHE_CLIP),
+        "unsharp": _env_bool("MATANGLAWIN_UNSHARP", DEFAULT_UNSHARP),
+        "min_thinness": _env_float("MATANGLAWIN_MIN_THINNESS", DEFAULT_MIN_THINNESS),
+        "min_length_frac": _env_float("MATANGLAWIN_MIN_LENGTH_FRAC", DEFAULT_MIN_LENGTH_FRAC),
     }
 
 
@@ -595,9 +609,11 @@ def main():
     cfg = detector_config()
     print(
         "  Detection config: "
-        f"conf={cfg['conf']} imgsz={cfg['imgsz']} min_area_px={cfg['min_area_px']} "
-        f"tiled={cfg['tiled']} tile={cfg['tile']} overlap={cfg['tile_overlap']} "
-        f"enhance={cfg['enhance']} augment={cfg['augment']}"
+        f"conf={cfg['conf']} imgsz={cfg['imgsz']} tiled={cfg['tiled']} tile={cfg['tile']} "
+        f"overlap={cfg['tile_overlap']} enhance={cfg['enhance']} "
+        f"clahe_clip={cfg['clahe_clip']} unsharp={cfg['unsharp']} augment={cfg['augment']} | "
+        f"precision: min_area_px={cfg['min_area_px']} min_thinness={cfg['min_thinness']} "
+        f"min_length_frac={cfg['min_length_frac']}"
     )
 
     print("=" * 60)

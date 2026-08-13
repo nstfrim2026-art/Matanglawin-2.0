@@ -47,12 +47,20 @@ def stub_no_crack(inference_core):
 
 
 def stub_one_crack(inference_core):
-    """Make predict_masks report a single sizable crack mask."""
+    """
+    Make predict_masks report a single crack-like mask: a THIN, elongated
+    vertical stripe spanning most of the image height (not a fat blob), so
+    it passes the detector's shape/precision filter the way a real crack
+    would.
+    """
     def fake(image, *a, **k):
         img = _as_img(image)
         h, w = img.shape[:2]
         m = np.zeros((h, w), dtype=np.float32)
-        m[h // 4:h // 2, w // 4:3 * w // 4] = 1.0
+        cx = w // 2
+        half = max(1, w // 40)  # thin
+        y1, y2 = max(0, int(h * 0.1)), max(1, int(h * 0.9))
+        m[y1:y2, max(0, cx - half):cx + half + 1] = 1.0
         return _Result(_Masks(np.array([m])), img)
 
     inference_core.predict_masks = fake

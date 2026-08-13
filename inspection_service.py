@@ -44,13 +44,17 @@ import inference_core
 from detector import (
     CrackDetector,
     DEFAULT_AUGMENT,
+    DEFAULT_CLAHE_CLIP,
     DEFAULT_CONF,
     DEFAULT_ENHANCE,
     DEFAULT_IMGSZ,
     DEFAULT_MIN_AREA_PX,
+    DEFAULT_MIN_LENGTH_FRAC,
+    DEFAULT_MIN_THINNESS,
     DEFAULT_TILE,
     DEFAULT_TILE_OVERLAP,
     DEFAULT_TILED,
+    DEFAULT_UNSHARP,
 )
 from inspection_db import InspectionDB, InspectionRecord, STATUS_CRACK, STATUS_NO_CRACK
 
@@ -73,13 +77,17 @@ class InspectionService:
         tile_overlap: float = DEFAULT_TILE_OVERLAP,
         enhance: bool = DEFAULT_ENHANCE,
         augment: bool = DEFAULT_AUGMENT,
+        clahe_clip: float = DEFAULT_CLAHE_CLIP,
+        unsharp: bool = DEFAULT_UNSHARP,
+        min_thinness: float = DEFAULT_MIN_THINNESS,
+        min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
     ):
         self.db = db
         self.inspections_dir = Path(inspections_dir)
         self.inspections_dir.mkdir(parents=True, exist_ok=True)
         self.weights = weights
-        # Inference-time recall knobs (no retraining). Forwarded verbatim
-        # to the single CrackDetector; see detector.py for what each does.
+        # Inference-time recall + precision knobs (no retraining). Forwarded
+        # verbatim to the single CrackDetector; see detector.py for details.
         self.conf = conf
         self.min_area_px = min_area_px
         self.imgsz = imgsz
@@ -88,6 +96,10 @@ class InspectionService:
         self.tile_overlap = tile_overlap
         self.enhance = enhance
         self.augment = augment
+        self.clahe_clip = clahe_clip
+        self.unsharp = unsharp
+        self.min_thinness = min_thinness
+        self.min_length_frac = min_length_frac
 
         self._detector: Optional[CrackDetector] = None
         self._detector_lock = threading.Lock()
@@ -110,6 +122,10 @@ class InspectionService:
                         tile_overlap=self.tile_overlap,
                         enhance=self.enhance,
                         augment=self.augment,
+                        clahe_clip=self.clahe_clip,
+                        unsharp=self.unsharp,
+                        min_thinness=self.min_thinness,
+                        min_length_frac=self.min_length_frac,
                     )
         return self._detector
 

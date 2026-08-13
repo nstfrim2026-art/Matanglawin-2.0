@@ -8,6 +8,7 @@ All use a stubbed predict_masks (no real model / weights).
 import sys
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,6 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import inference_core  # noqa: E402
 from tests import stubs  # noqa: E402
 from detector import CrackDetector  # noqa: E402
+
+
+def _stub_mask(mask2d):
+    """Make predict_masks return exactly this binary mask (whole-image path)."""
+    def fake(image, *a, **k):
+        img = stubs._as_img(image)
+        return stubs._Result(stubs._Masks(np.array([mask2d.astype(np.float32)])), img)
+    inference_core.predict_masks = fake
 
 
 # ------------------------------------------------- enhancement (CLAHE) ----
@@ -56,8 +65,10 @@ def test_tiled_runs_one_inference_per_tile_and_stitches_full_frame():
     calls = []
     stubs.stub_full_mask(inference_core, counter=calls)
     # 300x300 image, 100px tiles, no overlap -> a clean 3x3 grid = 9 tiles.
+    # Shape filter disabled here so we test tiling MECHANICS with the
+    # deliberately blob-shaped full-tile stub masks.
     det = CrackDetector(weights="x", tiled=True, tile=100, tile_overlap=0.0,
-                        enhance=False, min_area_px=10)
+                        enhance=False, min_area_px=10, min_thinness=0, min_length_frac=0)
     img = np.full((300, 300, 3), 120, dtype=np.uint8)
     res = det.process_frame(img)
     assert len(calls) == 9, f"expected 9 tile inferences, got {len(calls)}"
@@ -112,21 +123,80 @@ def test_tiled_min_area_filter_drops_specks():
     assert res.has_crack is False
 
 
+# --------------------------------------- shape / precision filter --------
+
+def _blob(size=200, r=22):
+    m = np.zeros((size, size), np.uint8)
+    cv2.circle(m, (size // 2, size // 2), r, 1, -1)  # filled disk = compact blob
+    return m
+
+
+def _thin_line(size=200, length=150, width=4):
+    m = np.zeros((size, size), np.uint8)
+    x = size // 2
+    y1 = (size - length) // 2
+    m[y1:y1 + length, x - width // 2:x + width // 2 + 1] = 1
+    return m
+
+
+def test_shape_filter_rejects_compact_blob():
+    _stub_mask(_blob(size=200, r=22))
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=20, min_thinness=3.0, min_length_frac=0.0)
+    assert det.process_frame(np.zeros((200, 200, 3), np.uint8)).has_crack is False
+
+
+def test_shape_filter_keeps_thin_long_crack():
+    _stub_mask(_thin_line(size=200, length=150, width=4))
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=20, min_thinness=3.0, min_length_frac=0.0)
+    res = det.process_frame(np.zeros((200, 200, 3), np.uint8))
+    assert res.has_crack is True
+    assert res.num_instances == 1
+
+
+def test_shape_filter_length_rejects_short_fragment():
+    # Thin (passes thinness) but SHORT relative to the image -> rejected.
+    _stub_mask(_thin_line(size=800, length=25, width=2))
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0.0, min_length_frac=0.1)  # need >= 80px
+    assert det.process_frame(np.zeros((800, 800, 3), np.uint8)).has_crack is False
+
+
+def test_shape_filter_length_keeps_long_crack():
+    _stub_mask(_thin_line(size=800, length=400, width=3))
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0.0, min_length_frac=0.1)
+    assert det.process_frame(np.zeros((800, 800, 3), np.uint8)).has_crack is True
+
+
+def test_shape_filter_can_be_disabled():
+    _stub_mask(_blob(size=200, r=22))
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0.0, min_length_frac=0.0)
+    assert det.process_frame(np.zeros((200, 200, 3), np.uint8)).has_crack is True
+
+
 # --------------------------------------------------- env config plumbing --
 
 def test_detector_config_defaults(monkeypatch):
     import app as appmod
     for var in ("MATANGLAWIN_CONF", "MATANGLAWIN_IMGSZ", "MATANGLAWIN_MIN_AREA_PX",
                 "MATANGLAWIN_TILED", "MATANGLAWIN_TILE", "MATANGLAWIN_TILE_OVERLAP",
-                "MATANGLAWIN_ENHANCE", "MATANGLAWIN_AUGMENT"):
+                "MATANGLAWIN_ENHANCE", "MATANGLAWIN_AUGMENT", "MATANGLAWIN_CLAHE_CLIP",
+                "MATANGLAWIN_UNSHARP", "MATANGLAWIN_MIN_THINNESS", "MATANGLAWIN_MIN_LENGTH_FRAC"):
         monkeypatch.delenv(var, raising=False)
     cfg = appmod.detector_config()
-    assert cfg["conf"] == 0.15
+    assert cfg["conf"] == 0.20
     assert cfg["imgsz"] == 1280
-    assert cfg["min_area_px"] == 40
+    assert cfg["min_area_px"] == 60
     assert cfg["tiled"] is True
     assert cfg["enhance"] is True
     assert cfg["augment"] is False
+    assert cfg["clahe_clip"] == 1.5
+    assert cfg["unsharp"] is False
+    assert cfg["min_thinness"] == 3.0
+    assert cfg["min_length_frac"] == 0.05
 
 
 def test_detector_config_reads_env(monkeypatch):
@@ -139,6 +209,10 @@ def test_detector_config_reads_env(monkeypatch):
     monkeypatch.setenv("MATANGLAWIN_TILE_OVERLAP", "0.35")
     monkeypatch.setenv("MATANGLAWIN_ENHANCE", "off")
     monkeypatch.setenv("MATANGLAWIN_AUGMENT", "yes")
+    monkeypatch.setenv("MATANGLAWIN_CLAHE_CLIP", "2.5")
+    monkeypatch.setenv("MATANGLAWIN_UNSHARP", "1")
+    monkeypatch.setenv("MATANGLAWIN_MIN_THINNESS", "5")
+    monkeypatch.setenv("MATANGLAWIN_MIN_LENGTH_FRAC", "0.12")
     cfg = appmod.detector_config()
     assert cfg["conf"] == 0.3
     assert cfg["imgsz"] == 1536
@@ -148,6 +222,10 @@ def test_detector_config_reads_env(monkeypatch):
     assert cfg["tile_overlap"] == 0.35
     assert cfg["enhance"] is False
     assert cfg["augment"] is True
+    assert cfg["clahe_clip"] == 2.5
+    assert cfg["unsharp"] is True
+    assert cfg["min_thinness"] == 5
+    assert cfg["min_length_frac"] == 0.12
 
 
 def test_service_forwards_config_to_detector():
