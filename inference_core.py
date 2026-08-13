@@ -80,18 +80,55 @@ def draw_mask_overlay(
     return blended
 
 
+def enhance_for_detection(
+    image: np.ndarray,
+    clahe_clip: float = 2.0,
+    tile_grid: int = 8,
+    unsharp: bool = True,
+) -> np.ndarray:
+    """
+    Return a contrast-boosted COPY of `image` (BGR) for the model to look
+    at. This makes faint / hairline cracks stand out (CLAHE on the L
+    channel + a light unsharp mask) so the segmenter is more likely to
+    pick them up.
+
+    IMPORTANT: this is a DETECTION-ONLY transform. The caller feeds the
+    enhanced copy to the model, but the photo that is stored and shown to
+    the operator remains the untouched original, and the red highlight is
+    drawn on that original. The transform is purely photometric (no
+    resize/warp), so the masks it produces align pixel-for-pixel with the
+    original. The input array is never modified in place.
+    """
+    if image is None or image.size == 0:
+        return image
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(tile_grid, tile_grid))
+    l = clahe.apply(l)
+    out = cv2.cvtColor(cv2.merge((l, a, b)), cv2.COLOR_LAB2BGR)
+    if unsharp:
+        blur = cv2.GaussianBlur(out, (0, 0), 3)
+        out = cv2.addWeighted(out, 1.5, blur, -0.5, 0)
+    return out
+
+
 def predict_masks(
     image,
     weights: str = "best.pt",
     conf: float = 0.25,
     imgsz: int = 640,
     device: Optional[str] = None,
+    augment: bool = False,
 ):
     """
     Run YOLO11-seg on an already-loaded image (numpy array, BGR) OR a
     path, and return the raw `ultralytics` Result object for the first
     (only) image. This is the single inference call shared by every
     still-photo analysis path. It is NEVER called on a video stream.
+
+    `imgsz` controls the inference resolution (higher keeps thin cracks
+    resolvable); `augment` enables test-time augmentation (multi-scale +
+    flips) for a further recall boost at extra compute cost.
     """
     model = get_model(weights)
     results = model.predict(
@@ -100,6 +137,7 @@ def predict_masks(
         imgsz=imgsz,
         retina_masks=True,
         device=device,
+        augment=augment,
         verbose=False,
     )
     return results[0]

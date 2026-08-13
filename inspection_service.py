@@ -41,7 +41,17 @@ from typing import Optional
 import cv2
 
 import inference_core
-from detector import CrackDetector, DEFAULT_CONF, DEFAULT_MIN_AREA_PX
+from detector import (
+    CrackDetector,
+    DEFAULT_AUGMENT,
+    DEFAULT_CONF,
+    DEFAULT_ENHANCE,
+    DEFAULT_IMGSZ,
+    DEFAULT_MIN_AREA_PX,
+    DEFAULT_TILE,
+    DEFAULT_TILE_OVERLAP,
+    DEFAULT_TILED,
+)
 from inspection_db import InspectionDB, InspectionRecord, STATUS_CRACK, STATUS_NO_CRACK
 
 
@@ -57,13 +67,27 @@ class InspectionService:
         weights: str,
         conf: float = DEFAULT_CONF,
         min_area_px: int = DEFAULT_MIN_AREA_PX,
+        imgsz: int = DEFAULT_IMGSZ,
+        tiled: bool = DEFAULT_TILED,
+        tile: int = DEFAULT_TILE,
+        tile_overlap: float = DEFAULT_TILE_OVERLAP,
+        enhance: bool = DEFAULT_ENHANCE,
+        augment: bool = DEFAULT_AUGMENT,
     ):
         self.db = db
         self.inspections_dir = Path(inspections_dir)
         self.inspections_dir.mkdir(parents=True, exist_ok=True)
         self.weights = weights
+        # Inference-time recall knobs (no retraining). Forwarded verbatim
+        # to the single CrackDetector; see detector.py for what each does.
         self.conf = conf
         self.min_area_px = min_area_px
+        self.imgsz = imgsz
+        self.tiled = tiled
+        self.tile = tile
+        self.tile_overlap = tile_overlap
+        self.enhance = enhance
+        self.augment = augment
 
         self._detector: Optional[CrackDetector] = None
         self._detector_lock = threading.Lock()
@@ -77,7 +101,15 @@ class InspectionService:
             with self._detector_lock:
                 if self._detector is None:
                     self._detector = CrackDetector(
-                        weights=self.weights, conf=self.conf, min_area_px=self.min_area_px
+                        weights=self.weights,
+                        conf=self.conf,
+                        min_area_px=self.min_area_px,
+                        imgsz=self.imgsz,
+                        tiled=self.tiled,
+                        tile=self.tile,
+                        tile_overlap=self.tile_overlap,
+                        enhance=self.enhance,
+                        augment=self.augment,
                     )
         return self._detector
 

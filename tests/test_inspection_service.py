@@ -86,6 +86,29 @@ def test_invalid_image_raises(tmp_path, monkeypatch):
         pass
 
 
+def test_enhancement_does_not_leak_into_stored_original(tmp_path, monkeypatch):
+    # With detection-only enhancement ON, the stored ORIGINAL must remain
+    # the untouched photo (contrast NOT boosted) - enhancement only affects
+    # what the model looks at.
+    stubs.stub_no_crack(inference_core)
+    db = InspectionDB(str(tmp_path / "insp.db"))
+    svc = InspectionService(db, str(tmp_path / "inspections"), weights="x", enhance=True)
+
+    # A low-contrast image with a faint streak.
+    img = np.full((80, 80, 3), 150, dtype=np.uint8)
+    img[:, 39:41] = 138
+    src = tmp_path / "faint.png"
+    cv2.imwrite(str(src), img)
+
+    rec = svc.analyze_file(str(src), source="import")
+    stored = cv2.imread(rec.original_image_path)
+    enhanced = inference_core.enhance_for_detection(img)
+    # Stored original stays close to the input, and is clearly NOT the
+    # higher-contrast enhanced version.
+    assert abs(float(stored.std()) - float(img.std())) < 5.0
+    assert float(enhanced.std()) > float(stored.std())
+
+
 def test_manual_and_import_converge_on_same_service(tmp_path, monkeypatch):
     stubs.stub_one_crack(inference_core)
     svc, db = _service(tmp_path)

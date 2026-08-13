@@ -58,6 +58,24 @@ def stub_one_crack(inference_core):
     inference_core.predict_masks = fake
 
 
+def stub_full_mask(inference_core, counter=None):
+    """
+    Make predict_masks report a mask covering the ENTIRE input image.
+    Useful for exercising the tiled path: each tile returns a full-tile
+    mask, which the detector must stitch back into full-frame coords.
+    If `counter` (a list) is given, appends each call's image shape.
+    """
+    def fake(image, *a, **k):
+        img = _as_img(image)
+        h, w = img.shape[:2]
+        if counter is not None:
+            counter.append((h, w))
+        m = np.ones((h, w), dtype=np.float32)
+        return _Result(_Masks(np.array([m])), img)
+
+    inference_core.predict_masks = fake
+
+
 def stub_tiny_speck(inference_core, area_px=9):
     """Make predict_masks report only a tiny noise speck (below min-area)."""
     def fake(image, *a, **k):

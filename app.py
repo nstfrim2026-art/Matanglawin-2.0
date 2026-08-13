@@ -73,6 +73,16 @@ from werkzeug.utils import secure_filename
 
 import network_config
 from bridge_status import BridgeStatus
+from detector import (
+    DEFAULT_AUGMENT,
+    DEFAULT_CONF,
+    DEFAULT_ENHANCE,
+    DEFAULT_IMGSZ,
+    DEFAULT_MIN_AREA_PX,
+    DEFAULT_TILE,
+    DEFAULT_TILE_OVERLAP,
+    DEFAULT_TILED,
+)
 from import_ledger import ImportLedger, hash_bytes
 from inference_core import get_model
 from inspection_db import InspectionDB
@@ -122,6 +132,56 @@ def allowed_file(filename: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Inference-time detection knobs (env-configurable; NO retraining needed).
+# These tune recall on thin/hairline cracks in high-resolution DJI stills.
+# They only affect what the model looks at - never the stored/displayed
+# original, the live POV, or the (metric-free) result UI.
+#
+#   MATANGLAWIN_CONF          detection threshold        (default 0.15)
+#   MATANGLAWIN_IMGSZ         whole-image inference size (default 1280)
+#   MATANGLAWIN_MIN_AREA_PX   noise floor in mask px     (default 40)
+#   MATANGLAWIN_TILED         tiled/sliced inference 1/0 (default 1)
+#   MATANGLAWIN_TILE          tile size in px            (default 1024)
+#   MATANGLAWIN_TILE_OVERLAP  tile overlap fraction      (default 0.2)
+#   MATANGLAWIN_ENHANCE       CLAHE+unsharp on input 1/0 (default 1)
+#   MATANGLAWIN_AUGMENT       test-time augmentation 1/0 (default 0)
+# ---------------------------------------------------------------------------
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def detector_config() -> dict:
+    """Assemble the detector knobs from the environment (falling back to defaults)."""
+    return {
+        "conf": _env_float("MATANGLAWIN_CONF", DEFAULT_CONF),
+        "imgsz": _env_int("MATANGLAWIN_IMGSZ", DEFAULT_IMGSZ),
+        "min_area_px": _env_int("MATANGLAWIN_MIN_AREA_PX", DEFAULT_MIN_AREA_PX),
+        "tiled": _env_bool("MATANGLAWIN_TILED", DEFAULT_TILED),
+        "tile": _env_int("MATANGLAWIN_TILE", DEFAULT_TILE),
+        "tile_overlap": _env_float("MATANGLAWIN_TILE_OVERLAP", DEFAULT_TILE_OVERLAP),
+        "enhance": _env_bool("MATANGLAWIN_ENHANCE", DEFAULT_ENHANCE),
+        "augment": _env_bool("MATANGLAWIN_AUGMENT", DEFAULT_AUGMENT),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Lazily-created singletons (DB, analysis service, import watcher). Lazy so
 # importing app.py (e.g. in tests) never loads YOLO weights or starts threads.
 # ---------------------------------------------------------------------------
@@ -158,7 +218,9 @@ def get_service() -> InspectionService:
     if _service is None:
         with _get_lock():
             if _service is None:
-                _service = InspectionService(get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS)
+                _service = InspectionService(
+                    get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS, **detector_config()
+                )
     return _service
 
 
@@ -529,6 +591,14 @@ def main():
         print(f"  Watching for DJI photos in: {IMPORT_DIR}")
     except Exception as exc:  # noqa: BLE001 - watcher failure must not stop the web app
         print(f"  WARNING: photo import watcher failed to start: {exc}")
+
+    cfg = detector_config()
+    print(
+        "  Detection config: "
+        f"conf={cfg['conf']} imgsz={cfg['imgsz']} min_area_px={cfg['min_area_px']} "
+        f"tiled={cfg['tiled']} tile={cfg['tile']} overlap={cfg['tile_overlap']} "
+        f"enhance={cfg['enhance']} augment={cfg['augment']}"
+    )
 
     print("=" * 60)
     print("  MatanglaWIN - UAV Crack Inspection")

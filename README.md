@@ -171,6 +171,49 @@ image.
 
 ---
 
+## Tuning detection sensitivity (thin cracks — no retraining)
+
+High-resolution DJI stills shrink ~6× when analyzed at a small inference
+size, so a hairline crack can drop below one pixel and vanish before the
+model ever sees it. To recover thin/faint cracks **without retraining**,
+analysis runs with recall-tuned defaults and **tiled (sliced) inference**:
+the photo is cut into overlapping tiles, each analyzed at near-native
+resolution, and the masks are stitched back together. A light,
+detection-only contrast boost (CLAHE + unsharp) helps faint cracks stand
+out — applied only to the model's input, never to the stored/displayed
+original, and never to the live POV.
+
+All knobs are environment variables (no code edits, nothing shown in the
+UI):
+
+```
+MATANGLAWIN_CONF=0.15          # detection threshold (lower = more sensitive)
+MATANGLAWIN_IMGSZ=1280         # whole-image inference size
+MATANGLAWIN_MIN_AREA_PX=40     # noise floor (mask pixels)
+MATANGLAWIN_TILED=1            # tiled/sliced inference on/off (biggest win)
+MATANGLAWIN_TILE=1024          # tile size in px (try 640 for very thin cracks)
+MATANGLAWIN_TILE_OVERLAP=0.2   # tile overlap fraction
+MATANGLAWIN_ENHANCE=1          # CLAHE+unsharp on the analysis copy only
+MATANGLAWIN_AUGMENT=0          # test-time augmentation (extra recall, slower)
+```
+
+Measured on the real `best.pt` with a faint ~1px crack in a 1600×2400
+image: the old whole-image path (conf 0.25, imgsz 640) detected **0** crack
+pixels, and even imgsz 1280 + enhancement still missed it — while tiled +
+enhancement recovered it (~13k crack pixels). Tiling was the decisive
+factor. Smaller tiles (e.g. `MATANGLAWIN_TILE=640`) recover the thinnest
+cracks best, at the cost of more tiles/time per photo.
+
+Trade-offs: lower `conf` and tiling raise recall but can add occasional
+false positives on plain wall texture, shadows, or edges — tune `conf` on a
+few of your own photos. Tiling costs seconds per photo; that is fine here
+because it is **still-photo** analysis and never touches the live POV.
+Use the **Manual Upload** page to re-run one photo and compare settings
+quickly. If thin cracks are *still* missed after tuning, that is when more
+training data (native-resolution hairline-crack crops) becomes the answer.
+
+---
+
 ## Dynamic IP (works on any network)
 
 The PC's LAN IP is never hardcoded. On every request the app either uses
@@ -304,7 +347,9 @@ check confirms the exact original bytes reach the analysis input.
 - `import_ledger.py` — SHA-256 de-dup for `/api/import` (retry-safe).
 - `bridge_status.py` — PHOTO BRIDGE liveness (READY/WAITING/OFFLINE).
 - `detector.py` / `inference_core.py` — YOLO11-seg segmentation + red
-  overlay drawing (shared, no duplication).
+  overlay drawing (shared, no duplication). Includes tiled/sliced inference
+  and detection-only contrast enhancement for thin-crack recall (see
+  "Tuning detection sensitivity").
 - `inspection_db.py` — SQLite inspection history.
 - `network_config.py` — dynamic IP + MediaMTX config generation.
 - `infer_overlay.py` — original standalone CLI (unchanged behavior).
