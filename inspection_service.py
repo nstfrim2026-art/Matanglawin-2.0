@@ -48,6 +48,7 @@ from detector import (
     DEFAULT_CONF,
     DEFAULT_ENHANCE,
     DEFAULT_IMGSZ,
+    DEFAULT_MAX_THICKNESS_FRAC,
     DEFAULT_MIN_AREA_PX,
     DEFAULT_MIN_LENGTH_FRAC,
     DEFAULT_MIN_THINNESS,
@@ -79,6 +80,7 @@ class InspectionService:
         augment: bool = DEFAULT_AUGMENT,
         clahe_clip: float = DEFAULT_CLAHE_CLIP,
         unsharp: bool = DEFAULT_UNSHARP,
+        max_thickness_frac: float = DEFAULT_MAX_THICKNESS_FRAC,
         min_thinness: float = DEFAULT_MIN_THINNESS,
         min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
     ):
@@ -98,6 +100,7 @@ class InspectionService:
         self.augment = augment
         self.clahe_clip = clahe_clip
         self.unsharp = unsharp
+        self.max_thickness_frac = max_thickness_frac
         self.min_thinness = min_thinness
         self.min_length_frac = min_length_frac
 
@@ -124,6 +127,7 @@ class InspectionService:
                         augment=self.augment,
                         clahe_clip=self.clahe_clip,
                         unsharp=self.unsharp,
+                        max_thickness_frac=self.max_thickness_frac,
                         min_thinness=self.min_thinness,
                         min_length_frac=self.min_length_frac,
                     )

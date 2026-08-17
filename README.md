@@ -203,10 +203,20 @@ MATANGLAWIN_UNSHARP=0           # add unsharp mask (more recall, more false edge
 MATANGLAWIN_AUGMENT=0           # test-time augmentation (extra recall, slower)
 
 # precision (reject non-crack detections)
-MATANGLAWIN_MIN_AREA_PX=60      # drop specks below this many mask pixels
-MATANGLAWIN_MIN_THINNESS=3.0    # reject compact blobs (disk ~= 1.0; long crack >> 1)
-MATANGLAWIN_MIN_LENGTH_FRAC=0.05  # drop fragments shorter than 5% of the long side
+MATANGLAWIN_MAX_THICKNESS_FRAC=0.03  # strip regions wider than 3% of the short side
+MATANGLAWIN_MIN_AREA_PX=60           # drop specks below this many mask pixels
+MATANGLAWIN_MIN_THINNESS=3.0         # reject compact blobs (disk ~= 1.0; crack >> 1)
+MATANGLAWIN_MIN_LENGTH_FRAC=0.05     # drop fragments shorter than 5% of the long side
 ```
+
+The most important precision lever is **`MATANGLAWIN_MAX_THICKNESS_FRAC`**.
+A crack is thin *everywhere*; the worst false positives are wide filled
+regions the model paints over a dark beam, a shadowed sill, or a stain — and
+these often connect to the real crack. A morphological opening removes
+anything whose local thickness exceeds `max_thickness_frac * min(H, W)`, so
+those wide regions are stripped **even when a thin crack is connected to
+them** (the crack survives, the blob does not). Set it to 0 to disable, or
+raise it to keep genuinely wide cracks / spalled areas.
 
 Measured on the real `best.pt`:
 
@@ -216,25 +226,29 @@ Measured on the real `best.pt`:
   thinnest cracks best (more tiles/time).
 - **Precision** — a textured wall with one real crack plus 9 stains/dashes:
   without the shape filter the model returned **10** detections (crack + 9
-  false positives); with the shape filter it returned **1** — only the real
-  crack, its mask essentially unchanged.
+  false positives); with the filter it returned **1** — only the real crack.
+- **Thickness suppression** — verified at the unit level: a thin crack drawn
+  through a wide "beam" band keeps the crack while the band is stripped
+  (>80% of the wide area removed). It targets exactly the filled beam/sill/
+  stain regions seen in field photos.
 
 Tuning guidance (use the **Manual Upload** page to A/B one photo quickly):
 
-- Over-detecting (texture/stains marked red)? Raise `MATANGLAWIN_CONF`
-  (e.g. 0.30), raise `MATANGLAWIN_MIN_THINNESS` (e.g. 4–5), raise
-  `MATANGLAWIN_MIN_LENGTH_FRAC` (e.g. 0.08), lower `MATANGLAWIN_CLAHE_CLIP`,
-  keep `MATANGLAWIN_UNSHARP=0`.
+- Over-detecting (beams / sills / stains / texture marked red)? Lower
+  `MATANGLAWIN_MAX_THICKNESS_FRAC` (e.g. 0.02) to strip wider regions, raise
+  `MATANGLAWIN_CONF` (e.g. 0.30), raise `MATANGLAWIN_MIN_THINNESS` (4–5) and
+  `MATANGLAWIN_MIN_LENGTH_FRAC` (0.08), lower `MATANGLAWIN_CLAHE_CLIP`.
 - Missing faint/short cracks? Lower `MATANGLAWIN_CONF` (e.g. 0.12), lower
-  `MATANGLAWIN_MIN_LENGTH_FRAC` (e.g. 0.02) and `MATANGLAWIN_MIN_THINNESS`
-  (e.g. 2), set `MATANGLAWIN_TILE=640`, enable `MATANGLAWIN_UNSHARP=1`.
-  Setting `MATANGLAWIN_MIN_THINNESS=0` and `MATANGLAWIN_MIN_LENGTH_FRAC=0`
-  disables the shape filter entirely.
+  `MATANGLAWIN_MIN_LENGTH_FRAC` (0.02) and `MATANGLAWIN_MIN_THINNESS` (2),
+  raise `MATANGLAWIN_MAX_THICKNESS_FRAC` (e.g. 0.06) or set it to 0, set
+  `MATANGLAWIN_TILE=640`, enable `MATANGLAWIN_UNSHARP=1`. Setting the three
+  shape/thickness knobs to 0 disables that filtering entirely.
 
 Note the default `MIN_LENGTH_FRAC=0.05` also drops genuine *short* secondary
-cracks; lower it if you need those. Tiling costs seconds per photo, which is
-fine for **still-photo** analysis and never touches the live POV. If cracks
-are still missed after tuning, that is when more training data
+cracks, and a very wide crack/spall may be trimmed by thickness suppression;
+adjust those knobs if you need such cases. Tiling costs seconds per photo,
+which is fine for **still-photo** analysis and never touches the live POV.
+If cracks are still missed after tuning, that is when more training data
 (native-resolution hairline crops) becomes the real answer.
 
 ---

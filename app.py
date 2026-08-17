@@ -79,6 +79,7 @@ from detector import (
     DEFAULT_CONF,
     DEFAULT_ENHANCE,
     DEFAULT_IMGSZ,
+    DEFAULT_MAX_THICKNESS_FRAC,
     DEFAULT_MIN_AREA_PX,
     DEFAULT_MIN_LENGTH_FRAC,
     DEFAULT_MIN_THINNESS,
@@ -151,10 +152,12 @@ def allowed_file(filename: str) -> bool:
 #     MATANGLAWIN_CLAHE_CLIP    CLAHE clip limit           (default 1.5)
 #     MATANGLAWIN_UNSHARP       unsharp mask 1/0           (default 0)
 #     MATANGLAWIN_AUGMENT       test-time augmentation 1/0 (default 0)
-#   Precision (don't paint texture/stains as cracks):
-#     MATANGLAWIN_MIN_AREA_PX     noise floor in mask px       (default 60)
-#     MATANGLAWIN_MIN_THINNESS    reject compact blobs         (default 3.0)
-#     MATANGLAWIN_MIN_LENGTH_FRAC drop short fragments (frac)  (default 0.05)
+#   Precision (don't paint texture/stains/beams/sills as cracks):
+#     MATANGLAWIN_MAX_THICKNESS_FRAC strip regions wider than this frac of
+#                                    the short side  (default 0.03; 0=off)
+#     MATANGLAWIN_MIN_AREA_PX        noise floor in mask px       (default 60)
+#     MATANGLAWIN_MIN_THINNESS       reject compact blobs         (default 3.0)
+#     MATANGLAWIN_MIN_LENGTH_FRAC    drop short fragments (frac)  (default 0.05)
 # ---------------------------------------------------------------------------
 def _env_float(name: str, default: float) -> float:
     try:
@@ -190,6 +193,7 @@ def detector_config() -> dict:
         "augment": _env_bool("MATANGLAWIN_AUGMENT", DEFAULT_AUGMENT),
         "clahe_clip": _env_float("MATANGLAWIN_CLAHE_CLIP", DEFAULT_CLAHE_CLIP),
         "unsharp": _env_bool("MATANGLAWIN_UNSHARP", DEFAULT_UNSHARP),
+        "max_thickness_frac": _env_float("MATANGLAWIN_MAX_THICKNESS_FRAC", DEFAULT_MAX_THICKNESS_FRAC),
         "min_thinness": _env_float("MATANGLAWIN_MIN_THINNESS", DEFAULT_MIN_THINNESS),
         "min_length_frac": _env_float("MATANGLAWIN_MIN_LENGTH_FRAC", DEFAULT_MIN_LENGTH_FRAC),
     }
@@ -612,7 +616,8 @@ def main():
         f"conf={cfg['conf']} imgsz={cfg['imgsz']} tiled={cfg['tiled']} tile={cfg['tile']} "
         f"overlap={cfg['tile_overlap']} enhance={cfg['enhance']} "
         f"clahe_clip={cfg['clahe_clip']} unsharp={cfg['unsharp']} augment={cfg['augment']} | "
-        f"precision: min_area_px={cfg['min_area_px']} min_thinness={cfg['min_thinness']} "
+        f"precision: max_thickness_frac={cfg['max_thickness_frac']} "
+        f"min_area_px={cfg['min_area_px']} min_thinness={cfg['min_thinness']} "
         f"min_length_frac={cfg['min_length_frac']}"
     )
 

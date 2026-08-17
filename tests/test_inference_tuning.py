@@ -65,10 +65,11 @@ def test_tiled_runs_one_inference_per_tile_and_stitches_full_frame():
     calls = []
     stubs.stub_full_mask(inference_core, counter=calls)
     # 300x300 image, 100px tiles, no overlap -> a clean 3x3 grid = 9 tiles.
-    # Shape filter disabled here so we test tiling MECHANICS with the
-    # deliberately blob-shaped full-tile stub masks.
+    # All precision filters disabled here so we test tiling MECHANICS with
+    # the deliberately blob-shaped full-tile stub masks.
     det = CrackDetector(weights="x", tiled=True, tile=100, tile_overlap=0.0,
-                        enhance=False, min_area_px=10, min_thinness=0, min_length_frac=0)
+                        enhance=False, min_area_px=10, min_thinness=0, min_length_frac=0,
+                        max_thickness_frac=0)
     img = np.full((300, 300, 3), 120, dtype=np.uint8)
     res = det.process_frame(img)
     assert len(calls) == 9, f"expected 9 tile inferences, got {len(calls)}"
@@ -141,14 +142,14 @@ def _thin_line(size=200, length=150, width=4):
 
 def test_shape_filter_rejects_compact_blob():
     _stub_mask(_blob(size=200, r=22))
-    det = CrackDetector(weights="x", tiled=False, enhance=False,
+    det = CrackDetector(weights="x", tiled=False, enhance=False, max_thickness_frac=0,
                         min_area_px=20, min_thinness=3.0, min_length_frac=0.0)
     assert det.process_frame(np.zeros((200, 200, 3), np.uint8)).has_crack is False
 
 
 def test_shape_filter_keeps_thin_long_crack():
     _stub_mask(_thin_line(size=200, length=150, width=4))
-    det = CrackDetector(weights="x", tiled=False, enhance=False,
+    det = CrackDetector(weights="x", tiled=False, enhance=False, max_thickness_frac=0,
                         min_area_px=20, min_thinness=3.0, min_length_frac=0.0)
     res = det.process_frame(np.zeros((200, 200, 3), np.uint8))
     assert res.has_crack is True
@@ -158,23 +159,86 @@ def test_shape_filter_keeps_thin_long_crack():
 def test_shape_filter_length_rejects_short_fragment():
     # Thin (passes thinness) but SHORT relative to the image -> rejected.
     _stub_mask(_thin_line(size=800, length=25, width=2))
-    det = CrackDetector(weights="x", tiled=False, enhance=False,
+    det = CrackDetector(weights="x", tiled=False, enhance=False, max_thickness_frac=0,
                         min_area_px=10, min_thinness=0.0, min_length_frac=0.1)  # need >= 80px
     assert det.process_frame(np.zeros((800, 800, 3), np.uint8)).has_crack is False
 
 
 def test_shape_filter_length_keeps_long_crack():
     _stub_mask(_thin_line(size=800, length=400, width=3))
-    det = CrackDetector(weights="x", tiled=False, enhance=False,
+    det = CrackDetector(weights="x", tiled=False, enhance=False, max_thickness_frac=0,
                         min_area_px=10, min_thinness=0.0, min_length_frac=0.1)
     assert det.process_frame(np.zeros((800, 800, 3), np.uint8)).has_crack is True
 
 
 def test_shape_filter_can_be_disabled():
     _stub_mask(_blob(size=200, r=22))
-    det = CrackDetector(weights="x", tiled=False, enhance=False,
+    det = CrackDetector(weights="x", tiled=False, enhance=False, max_thickness_frac=0,
                         min_area_px=10, min_thinness=0.0, min_length_frac=0.0)
     assert det.process_frame(np.zeros((200, 200, 3), np.uint8)).has_crack is True
+
+
+# ------------------------------------------ thickness suppression --------
+
+def _beam_plus_crack(size=800, beam_rows=120, line_width=4):
+    """A wide filled top band (a 'beam') CONNECTED to a thin vertical crack."""
+    m = np.zeros((size, size), np.uint8)
+    m[0:beam_rows, :] = 1                       # wide beam (thick)
+    x = size // 2
+    m[beam_rows:int(size * 0.9), x - line_width // 2:x + line_width // 2 + 1] = 1  # thin crack
+    return m
+
+
+def test_thickness_removes_wide_blob():
+    # A big filled square is far thicker than the threshold. Thickness
+    # suppression strips the bulk; any tiny rounded-corner residue is then
+    # rejected by the default area/shape filters -> no crack.
+    m = np.zeros((600, 600), np.uint8)
+    m[200:400, 200:400] = 1  # 200px-thick block
+    _stub_mask(m)
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        max_thickness_frac=0.03)  # radius 9 -> removes ~200px block
+    assert det.process_frame(np.zeros((600, 600, 3), np.uint8)).has_crack is False
+
+
+def test_thickness_keeps_thin_crack_connected_to_thick_beam():
+    # THE key case (image 1): a thin crack joined to a wide beam. The beam
+    # must be stripped while the crack survives.
+    m = _beam_plus_crack(size=800, beam_rows=120, line_width=4)
+    beam_area = 120 * 800
+    _stub_mask(m)
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0, min_length_frac=0,
+                        max_thickness_frac=0.03)  # radius 12 -> beam(120) out, crack(4) kept
+    res = det.process_frame(np.zeros((800, 800, 3), np.uint8))
+    assert res.has_crack is True
+    total = sum(i.area_px for i in res.instances)
+    assert total < beam_area * 0.2, "the wide beam should have been stripped away"
+    # And the top beam band should be essentially gone from the kept mask.
+    union = res.union_mask((800, 800))
+    assert int(union[0:120, :].sum()) < beam_area * 0.2
+
+
+def test_thickness_can_be_disabled():
+    m = np.zeros((600, 600), np.uint8)
+    m[200:400, 200:400] = 1
+    _stub_mask(m)
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0, min_length_frac=0,
+                        max_thickness_frac=0)
+    assert det.process_frame(np.zeros((600, 600, 3), np.uint8)).has_crack is True
+
+
+def test_thickness_suppression_skipped_on_small_image():
+    # On a tiny image the disk radius would be < a few px, so suppression is
+    # skipped (avoids over-removal). A thick block therefore survives.
+    m = np.zeros((100, 100), np.uint8)
+    m[30:70, 30:70] = 1
+    _stub_mask(m)
+    det = CrackDetector(weights="x", tiled=False, enhance=False,
+                        min_area_px=10, min_thinness=0, min_length_frac=0,
+                        max_thickness_frac=0.03)  # radius 1 -> skipped
+    assert det.process_frame(np.zeros((100, 100, 3), np.uint8)).has_crack is True
 
 
 # --------------------------------------------------- env config plumbing --
@@ -184,7 +248,8 @@ def test_detector_config_defaults(monkeypatch):
     for var in ("MATANGLAWIN_CONF", "MATANGLAWIN_IMGSZ", "MATANGLAWIN_MIN_AREA_PX",
                 "MATANGLAWIN_TILED", "MATANGLAWIN_TILE", "MATANGLAWIN_TILE_OVERLAP",
                 "MATANGLAWIN_ENHANCE", "MATANGLAWIN_AUGMENT", "MATANGLAWIN_CLAHE_CLIP",
-                "MATANGLAWIN_UNSHARP", "MATANGLAWIN_MIN_THINNESS", "MATANGLAWIN_MIN_LENGTH_FRAC"):
+                "MATANGLAWIN_UNSHARP", "MATANGLAWIN_MIN_THINNESS", "MATANGLAWIN_MIN_LENGTH_FRAC",
+                "MATANGLAWIN_MAX_THICKNESS_FRAC"):
         monkeypatch.delenv(var, raising=False)
     cfg = appmod.detector_config()
     assert cfg["conf"] == 0.20
@@ -195,6 +260,7 @@ def test_detector_config_defaults(monkeypatch):
     assert cfg["augment"] is False
     assert cfg["clahe_clip"] == 1.5
     assert cfg["unsharp"] is False
+    assert cfg["max_thickness_frac"] == 0.03
     assert cfg["min_thinness"] == 3.0
     assert cfg["min_length_frac"] == 0.05
 
@@ -213,7 +279,9 @@ def test_detector_config_reads_env(monkeypatch):
     monkeypatch.setenv("MATANGLAWIN_UNSHARP", "1")
     monkeypatch.setenv("MATANGLAWIN_MIN_THINNESS", "5")
     monkeypatch.setenv("MATANGLAWIN_MIN_LENGTH_FRAC", "0.12")
+    monkeypatch.setenv("MATANGLAWIN_MAX_THICKNESS_FRAC", "0.06")
     cfg = appmod.detector_config()
+    assert cfg["max_thickness_frac"] == 0.06
     assert cfg["conf"] == 0.3
     assert cfg["imgsz"] == 1536
     assert cfg["min_area_px"] == 80
