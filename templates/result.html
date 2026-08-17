@@ -1,32 +1,32 @@
 {% extends "base.html" %}
-{% block title %}Matanglawin - Detection Result{% endblock %}
+{% block title %}MatanglaWIN - Inspection Result{% endblock %}
 {% block content %}
-  <section class="hero">
-    <h1>
-      {% if num_instances > 0 %}
-        Found {{ num_instances }} crack instance{{ 's' if num_instances != 1 else '' }}
-      {% else %}
-        No cracks detected
+  <section class="panel result-panel">
+    <div class="status-banner status-banner-lg {{ 'status-crack' if has_crack else 'status-ok' }}">
+      {{ status }}
+    </div>
+
+    <dl class="meta-list meta-inline">
+      <div><dt>Captured</dt><dd>{{ timestamp }}</dd></div>
+      <div><dt>Source</dt><dd>{{ source_label }}</dd></div>
+    </dl>
+
+    <div class="result-images {{ 'single' if not has_crack else '' }}">
+      <figure class="shot">
+        <figcaption>Original photo</figcaption>
+        <img src="{{ original_url }}" alt="Original photo" class="shot-img">
+      </figure>
+      {% if has_crack %}
+      <figure class="shot">
+        <figcaption>Red-highlighted</figcaption>
+        <img src="{{ highlighted_url }}" alt="Crack highlighted photo" class="shot-img">
+      </figure>
       {% endif %}
-    </h1>
-    <p class="hint">
-      Confidence &ge; {{ conf }} &middot; Mask opacity {{ alpha }} &middot; Outline {{ outline }}px
-    </p>
-  </section>
-
-  <section class="card result-grid">
-    <div class="result-col">
-      <h3>Original</h3>
-      <img src="{{ original_url }}" alt="Original image" class="result-img">
     </div>
-    <div class="result-col">
-      <h3>Detected cracks</h3>
-      <img src="{{ result_url }}" alt="Overlay result" class="result-img">
+
+    <div class="actions">
+      <a href="{{ url_for('index') }}" class="btn-secondary">Back to dashboard</a>
+      <a href="{{ url_for('inspections_page') }}" class="btn-primary">View inspection history</a>
     </div>
   </section>
-
-  <div class="actions">
-    <a href="{{ result_url }}" download class="btn-secondary">Download result</a>
-    <a href="{{ url_for('index') }}" class="btn-primary">Analyze another image</a>
-  </div>
 {% endblock %}

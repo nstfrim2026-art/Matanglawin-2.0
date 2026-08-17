@@ -3,37 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}Matanglawin - Crack Detection{% endblock %}</title>
+  <title>{% block title %}MatanglaWIN - UAV Crack Inspection{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/matanglawin-logo.png') }}"
+        onerror="this.href='{{ url_for('static', filename='img/matanglawin-logo.svg') }}'">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <header class="site-header">
-    <div class="container header-inner">
+    <div class="header-inner">
       <a class="brand" href="{{ url_for('index') }}">
-        <span class="brand-mark">&#128065;</span> Matanglawin
+        <img class="brand-logo"
+             src="{{ url_for('static', filename='img/matanglawin-logo.png') }}"
+             onerror="this.onerror=null;this.src='{{ url_for('static', filename='img/matanglawin-logo.svg') }}'"
+             alt="MatanglaWIN">
+        <span class="brand-text">
+          <span class="brand-name">MatanglaWIN</span>
+          <span class="tagline">UAV Structural Crack Inspection</span>
+        </span>
       </a>
-      <span class="tagline">AI Crack Detection &amp; Segmentation</span>
+      <nav class="site-nav">
+        <a href="{{ url_for('index') }}" class="{{ 'active' if active_nav == 'dashboard' else '' }}">Live Dashboard</a>
+        <a href="{{ url_for('inspections_page') }}" class="{{ 'active' if active_nav == 'inspections' else '' }}">Inspections</a>
+        <a href="{{ url_for('upload_page') }}" class="nav-secondary {{ 'active' if active_nav == 'upload' else '' }}">Manual Upload</a>
+      </nav>
     </div>
   </header>
 
-  <main class="container">
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <div class="flash-box">
-          {% for message in messages %}
-            <p>{{ message }}</p>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+  <main class="site-main">
+    <div class="wrap">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="flash-box">
+            {% for message in messages %}
+              <p>{{ message }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
 
-    {% block content %}{% endblock %}
+      {% block content %}{% endblock %}
+    </div>
   </main>
 
   <footer class="site-footer">
-    <div class="container">
-      <p>Matanglawin 2.0 &mdash; powered by YOLO11-seg</p>
+    <div class="wrap">
+      <p>MatanglaWIN &mdash; UAV structural inspection powered by YOLO11-seg segmentation</p>
     </div>
   </footer>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

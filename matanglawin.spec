@@ -20,11 +20,13 @@ ROOT = Path(".").resolve()
 datas = [
     (str(ROOT / "templates"), "templates"),
     (str(ROOT / "static" / "style.css"), "static"),
+    (str(ROOT / "static" / "dashboard.js"), "static"),
+    (str(ROOT / "static" / "img"), "static/img"),
     (str(ROOT / "best.pt"), "."),
 ]
-# static/uploads and static/results are write targets at runtime, not
-# bundled read-only resources - app.py creates a sibling writable
-# "matanglawin_data" folder next to the executable instead.
+# All runtime data (uploaded/imported photos, inspection results, the
+# SQLite DB) is written to a sibling "matanglawin_data" folder next to the
+# executable at runtime - none of it is a bundled read-only resource.
 
 datas += collect_data_files("ultralytics")
 
