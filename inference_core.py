@@ -30,6 +30,10 @@ _YOLO_CLASS = None
 # every request (loading is the slow part).
 _MODEL_CACHE = {}
 
+# Tighten the red overlay to the actual dark crack line (see
+# refine_crack_mask). On by default; disable with MATANGLAWIN_REFINE=0.
+DEFAULT_REFINE = True
+
 
 def get_model(weights: str = "best.pt"):
     global _YOLO_CLASS
@@ -78,6 +82,74 @@ def draw_mask_overlay(
         cv2.drawContours(blended, contours, -1, color, outline)
 
     return blended
+
+
+def refine_crack_mask(
+    image: np.ndarray,
+    mask: np.ndarray,
+    kernel_frac: float = 0.012,
+    min_blackhat: int = 10,
+) -> np.ndarray:
+    """
+    Tighten a (often fat/blobby) segmentation `mask` so it hugs the ACTUAL
+    dark crack line, instead of painting a wide band of surrounding
+    surface red.
+
+    A crack is a thin DARK feature on a lighter wall. A morphological
+    black-hat (closing minus the image) lights up exactly those dark thin
+    structures. Inside the detected `mask` we keep only the pixels that are
+    part of that dark structure (Otsu threshold on the in-mask black-hat
+    response), give the line a little body, reconnect small gaps, and clamp
+    the result to never exceed the original detection.
+
+    Safeguard: if there is no clear dark structure inside the detection
+    (peak black-hat response below `min_blackhat`, e.g. a bright/low-contrast
+    crack or a shadowed region), the refinement is considered unreliable and
+    the ORIGINAL mask is returned unchanged. This keeps the refinement a
+    fidelity improvement that never erases a genuine detection. Note the
+    refined mask can legitimately be a SMALL fraction of a fat input mask -
+    that is exactly the point when the input over-covered the crack.
+
+    Purely photometric + morphological: it only shrinks the mask within the
+    already-detected region, so it can't invent new detections and never
+    touches the stored original photo or the live POV.
+    """
+    if mask is None:
+        return mask
+    mask_u8 = mask.astype(np.uint8)
+    total = int(mask_u8.sum())
+    if total == 0:
+        return mask_u8
+
+    h, w = mask_u8.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    if gray.shape[:2] != (h, w):
+        gray = cv2.resize(gray, (w, h), interpolation=cv2.INTER_AREA)
+
+    k = int(max(9, round(kernel_frac * min(h, w))))
+    if k % 2 == 0:
+        k += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+
+    m = mask_u8.astype(bool)
+    vals = blackhat[m]
+    if vals.size == 0 or int(vals.max()) < min_blackhat:
+        return mask_u8  # no dark structure to lock onto -> keep original
+
+    otsu, _ = cv2.threshold(vals.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    thresh = max(float(otsu), float(min_blackhat))
+
+    core = ((blackhat >= thresh) & m).astype(np.uint8)
+    # Give the thin line a little body and reconnect small along-crack gaps,
+    # then clamp back inside the original detection.
+    core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    core = cv2.dilate(core, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    core = core & mask_u8
+
+    if int(core.sum()) == 0:
+        return mask_u8  # nothing survived -> don't erase the detection
+    return core
 
 
 def enhance_for_detection(

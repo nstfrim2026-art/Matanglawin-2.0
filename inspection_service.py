@@ -83,6 +83,7 @@ class InspectionService:
         max_thickness_frac: float = DEFAULT_MAX_THICKNESS_FRAC,
         min_thinness: float = DEFAULT_MIN_THINNESS,
         min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
+        refine: bool = inference_core.DEFAULT_REFINE,
     ):
         self.db = db
         self.inspections_dir = Path(inspections_dir)
@@ -103,6 +104,8 @@ class InspectionService:
         self.max_thickness_frac = max_thickness_frac
         self.min_thinness = min_thinness
         self.min_length_frac = min_length_frac
+        # Overlay fidelity: tighten the red mask to the actual crack line.
+        self.refine = refine
 
         self._detector: Optional[CrackDetector] = None
         self._detector_lock = threading.Lock()
@@ -176,6 +179,11 @@ class InspectionService:
             # the exact segmentation masks (no boxes). Result/history
             # artifact only - the live POV never gets this.
             union = result.union_mask(img_bgr.shape[:2])
+            if self.refine and union is not None:
+                # Tighten the red overlay to the actual dark crack line so it
+                # hugs the crack instead of a fat band (safeguarded: never
+                # erases a genuine detection). Uses the untouched original.
+                union = inference_core.refine_crack_mask(img_bgr, union)
             highlighted = inference_core.draw_mask_overlay(img_bgr, union)
             cv2.imwrite(str(highlighted_path), highlighted)
         else:

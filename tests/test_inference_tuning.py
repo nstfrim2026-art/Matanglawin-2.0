@@ -241,6 +241,33 @@ def test_thickness_suppression_skipped_on_small_image():
     assert det.process_frame(np.zeros((100, 100, 3), np.uint8)).has_crack is True
 
 
+# ------------------------------------------- mask refinement (fidelity) --
+
+def test_refine_tightens_fat_mask_to_dark_line():
+    img = np.full((200, 200, 3), 210, np.uint8)   # light wall
+    img[20:180, 98:102] = 40                       # thin dark crack line
+    mask = np.zeros((200, 200), np.uint8)
+    mask[20:180, 70:130] = 1                       # fat 60px band around it
+    refined = inference_core.refine_crack_mask(img, mask)
+    assert 0 < int(refined.sum()) < int(mask.sum())        # tightened, not erased
+    assert int(((refined > 0) & (mask == 0)).sum()) == 0   # stays within original
+    assert refined[100, 96:104].any()                      # still covers the crack
+
+
+def test_refine_keeps_original_when_no_dark_structure():
+    img = np.full((200, 200, 3), 180, np.uint8)   # uniform: no crack
+    mask = np.zeros((200, 200), np.uint8)
+    mask[50:150, 50:150] = 1
+    refined = inference_core.refine_crack_mask(img, mask)
+    assert int(refined.sum()) == int(mask.sum())  # safeguard: never erase
+
+
+def test_refine_handles_empty_and_none():
+    img = np.full((50, 50, 3), 200, np.uint8)
+    assert int(inference_core.refine_crack_mask(img, np.zeros((50, 50), np.uint8)).sum()) == 0
+    assert inference_core.refine_crack_mask(img, None) is None
+
+
 # --------------------------------------------------- env config plumbing --
 
 def test_detector_config_defaults(monkeypatch):
@@ -249,9 +276,10 @@ def test_detector_config_defaults(monkeypatch):
                 "MATANGLAWIN_TILED", "MATANGLAWIN_TILE", "MATANGLAWIN_TILE_OVERLAP",
                 "MATANGLAWIN_ENHANCE", "MATANGLAWIN_AUGMENT", "MATANGLAWIN_CLAHE_CLIP",
                 "MATANGLAWIN_UNSHARP", "MATANGLAWIN_MIN_THINNESS", "MATANGLAWIN_MIN_LENGTH_FRAC",
-                "MATANGLAWIN_MAX_THICKNESS_FRAC"):
+                "MATANGLAWIN_MAX_THICKNESS_FRAC", "MATANGLAWIN_REFINE"):
         monkeypatch.delenv(var, raising=False)
     cfg = appmod.detector_config()
+    assert cfg["refine"] is True
     assert cfg["conf"] == 0.20
     assert cfg["imgsz"] == 1280
     assert cfg["min_area_px"] == 60
@@ -280,8 +308,10 @@ def test_detector_config_reads_env(monkeypatch):
     monkeypatch.setenv("MATANGLAWIN_MIN_THINNESS", "5")
     monkeypatch.setenv("MATANGLAWIN_MIN_LENGTH_FRAC", "0.12")
     monkeypatch.setenv("MATANGLAWIN_MAX_THICKNESS_FRAC", "0.06")
+    monkeypatch.setenv("MATANGLAWIN_REFINE", "0")
     cfg = appmod.detector_config()
     assert cfg["max_thickness_frac"] == 0.06
+    assert cfg["refine"] is False
     assert cfg["conf"] == 0.3
     assert cfg["imgsz"] == 1536
     assert cfg["min_area_px"] == 80

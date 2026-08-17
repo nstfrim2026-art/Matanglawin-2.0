@@ -89,7 +89,7 @@ from detector import (
     DEFAULT_UNSHARP,
 )
 from import_ledger import ImportLedger, hash_bytes
-from inference_core import get_model
+from inference_core import DEFAULT_REFINE, get_model
 from inspection_db import InspectionDB
 from inspection_service import InspectionService, InvalidImageError
 from photo_import import PhotoImportWatcher
@@ -158,6 +158,8 @@ def allowed_file(filename: str) -> bool:
 #     MATANGLAWIN_MIN_AREA_PX        noise floor in mask px       (default 60)
 #     MATANGLAWIN_MIN_THINNESS       reject compact blobs         (default 3.0)
 #     MATANGLAWIN_MIN_LENGTH_FRAC    drop short fragments (frac)  (default 0.05)
+#   Overlay fidelity:
+#     MATANGLAWIN_REFINE             tighten red mask to the crack 1/0 (default 1)
 # ---------------------------------------------------------------------------
 def _env_float(name: str, default: float) -> float:
     try:
@@ -196,6 +198,7 @@ def detector_config() -> dict:
         "max_thickness_frac": _env_float("MATANGLAWIN_MAX_THICKNESS_FRAC", DEFAULT_MAX_THICKNESS_FRAC),
         "min_thinness": _env_float("MATANGLAWIN_MIN_THINNESS", DEFAULT_MIN_THINNESS),
         "min_length_frac": _env_float("MATANGLAWIN_MIN_LENGTH_FRAC", DEFAULT_MIN_LENGTH_FRAC),
+        "refine": _env_bool("MATANGLAWIN_REFINE", DEFAULT_REFINE),
     }
 
 
@@ -618,7 +621,7 @@ def main():
         f"clahe_clip={cfg['clahe_clip']} unsharp={cfg['unsharp']} augment={cfg['augment']} | "
         f"precision: max_thickness_frac={cfg['max_thickness_frac']} "
         f"min_area_px={cfg['min_area_px']} min_thinness={cfg['min_thinness']} "
-        f"min_length_frac={cfg['min_length_frac']}"
+        f"min_length_frac={cfg['min_length_frac']} refine={cfg['refine']}"
     )
 
     print("=" * 60)

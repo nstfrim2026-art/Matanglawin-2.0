@@ -207,7 +207,19 @@ MATANGLAWIN_MAX_THICKNESS_FRAC=0.03  # strip regions wider than 3% of the short 
 MATANGLAWIN_MIN_AREA_PX=60           # drop specks below this many mask pixels
 MATANGLAWIN_MIN_THINNESS=3.0         # reject compact blobs (disk ~= 1.0; crack >> 1)
 MATANGLAWIN_MIN_LENGTH_FRAC=0.05     # drop fragments shorter than 5% of the long side
+
+# overlay fidelity
+MATANGLAWIN_REFINE=1                  # tighten the red mask to the actual dark crack line
 ```
+
+**`MATANGLAWIN_REFINE`** tightens the red overlay so it hugs the actual
+crack instead of a fat band. Within each detection it keeps only the dark
+thin structure (a black-hat / Otsu step), giving a clean line that follows
+the crack. It is safeguarded: if a detection contains no clear dark
+structure (e.g. a bright/low-contrast crack) the original mask is kept
+unchanged, so a real detection is never erased. It only ever shrinks the
+mask *within* an already-detected region and never touches the stored
+original photo. Set to 0 to paint the raw segmentation masks instead.
 
 The most important precision lever is **`MATANGLAWIN_MAX_THICKNESS_FRAC`**.
 A crack is thin *everywhere*; the worst false positives are wide filled
