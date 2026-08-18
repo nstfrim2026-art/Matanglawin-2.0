@@ -386,6 +386,39 @@ check confirms the exact original bytes reach the analysis input.
 
 ---
 
+## Drone crack geotagging & spatial mapping (optional module)
+
+An offline/Colab layer that turns pixel-space crack segmentations into
+geographic **GeoJSON** so cracks can be mapped and measured. It reuses the
+same `inference_core` model and does **not** change the live web UI, the POV
+pipeline, or the automatic photo-import workflow. Spec:
+`.kiro/specs/drone-crack-geotagging/`.
+
+- `exif_metadata.py` — reads drone GPS (EXIF, DMS→decimal degrees), DJI XMP
+  gimbal yaw/pitch and relative/absolute altitude, and capture timestamp.
+  Degrades gracefully (never raises) when metadata is absent.
+- `geotag_engine.py` — converts each crack polygon to **WGS84 (EPSG:4326)**
+  via either an **orthomosaic GeoTIFF** transform (`rasterio`, most accurate)
+  or a **Ground Sample Distance** transform from altitude + camera specs
+  (nadir/flat-ground approximation), then exports a GeoJSON
+  `FeatureCollection` with per-crack `crack_area_m2`, `length_m`,
+  `confidence`, `image_name`, and `timestamp`.
+- `geotagging_colab_demo.ipynb` — mount Google Drive, run segmentation +
+  geotagging, and render an interactive **Folium/Leaflet** map inline.
+
+```bash
+pip install -r requirements-geo.txt     # exifread, pyproj, folium (+ rasterio for orthomosaics)
+python -c "from geotag_engine import geotag_batch, write_geojson; \
+           write_geojson(geotag_batch(['DJI_0001.JPG']), 'cracks.geojson')"
+```
+
+The geospatial extras are **optional**; the base app installs and runs
+without them, and the geotagging core math is unit-tested with only
+NumPy/OpenCV present. Confidence/area are exported in the GeoJSON (a GIS
+artifact for engineers) while remaining hidden in the operator web UI.
+Accuracy note: the GSD method assumes near-nadir capture over flat ground;
+use an orthomosaic for survey-grade results.
+
 ## Files
 
 - `app.py` — Flask app: dashboard, result, inspections, `/api/import`
