@@ -84,8 +84,14 @@ class InspectionService:
         min_thinness: float = DEFAULT_MIN_THINNESS,
         min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
         refine: bool = inference_core.DEFAULT_REFINE,
+        telemetry_store=None,
     ):
         self.db = db
+        # Optional aircraft-telemetry store (telemetry_store.TelemetryStore).
+        # When present, each inspection is stamped with the aircraft GPS
+        # sample nearest to the capture time. Absent -> no geotag, and
+        # analysis proceeds exactly as before (never blocked by missing GPS).
+        self.telemetry_store = telemetry_store
         self.inspections_dir = Path(inspections_dir)
         self.inspections_dir.mkdir(parents=True, exist_ok=True)
         self.weights = weights
@@ -138,22 +144,22 @@ class InspectionService:
 
     # -- public API ----------------------------------------------------
 
-    def analyze_file(self, image_path: str, source: str = "upload") -> InspectionRecord:
+    def analyze_file(self, image_path: str, source: str = "upload", captured_at=None) -> InspectionRecord:
         """Analyze an image file on disk. Raises InvalidImageError if unreadable."""
         img = cv2.imread(str(image_path))
         if img is None or img.size == 0:
             raise InvalidImageError(f"Could not read image: {image_path}")
-        return self._analyze(img, source=source)
+        return self._analyze(img, source=source, captured_at=captured_at)
 
-    def analyze_array(self, img_bgr, source: str = "upload") -> InspectionRecord:
+    def analyze_array(self, img_bgr, source: str = "upload", captured_at=None) -> InspectionRecord:
         """Analyze an already-decoded BGR image array."""
         if img_bgr is None or getattr(img_bgr, "size", 0) == 0:
             raise InvalidImageError("Empty image array")
-        return self._analyze(img_bgr, source=source)
+        return self._analyze(img_bgr, source=source, captured_at=captured_at)
 
     # -- internals -----------------------------------------------------
 
-    def _analyze(self, img_bgr, source: str) -> InspectionRecord:
+    def _analyze(self, img_bgr, source: str, captured_at=None) -> InspectionRecord:
         detector = self._get_detector()
         result = detector.process_frame(img_bgr)
 
@@ -192,6 +198,24 @@ class InspectionService:
             # the original (there is no red-highlighted image to show).
             cv2.imwrite(str(highlighted_path), img_bgr)
 
+        # Associate the nearest aircraft GPS sample to the capture time
+        # (offline geotagging). Never blocks analysis: any problem here just
+        # yields gps_available=False.
+        gps = {"gps_available": False, "gps_time_delta_ms": None, "latitude": None,
+               "longitude": None, "altitude_m": None, "gps_source": None}
+        captured_iso = None
+        if self.telemetry_store is not None:
+            try:
+                import telemetry_store as _ts
+                capture_ms = _ts.parse_timestamp_ms(captured_at)
+                if capture_ms is None:
+                    capture_ms = now * 1000.0
+                match = self.telemetry_store.match_for_capture(capture_ms)
+                gps.update({k: match[k] for k in gps})
+                captured_iso = captured_at if isinstance(captured_at, str) else ts_str
+            except Exception:  # noqa: BLE001 - geotag is best-effort only
+                pass
+
         inspection_id = self.db.add_inspection(
             timestamp=ts_str,
             status=status,
@@ -199,6 +223,13 @@ class InspectionService:
             original_image_path=str(original_path),
             highlighted_image_path=str(highlighted_path),
             num_instances=result.num_instances,
+            latitude=gps["latitude"],
+            longitude=gps["longitude"],
+            altitude_m=gps["altitude_m"],
+            gps_available=gps["gps_available"],
+            gps_time_delta_ms=gps["gps_time_delta_ms"],
+            gps_source=gps["gps_source"],
+            captured_at=captured_iso,
         )
 
         return self.db.get_inspection(inspection_id)

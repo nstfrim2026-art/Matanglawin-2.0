@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% set active_nav = 'map' %}
+{% block title %}MatanglaWIN - Inspection Map{% endblock %}
+{% block content %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+  <section class="page-head">
+    <div>
+      <h1>Inspection Map</h1>
+      <p class="lede">
+        Offline map of geolocated inspections. <span class="legend-dot legend-crack"></span>
+        CRACK DETECTED &nbsp; <span class="legend-dot legend-ok"></span> NO CRACK DETECTED.
+        Click a marker for the images, result, and time.
+      </p>
+    </div>
+    <span id="map-count" class="auto-note"></span>
+  </section>
+
+  <section class="panel">
+    <div id="map" class="map-canvas"></div>
+    <p id="map-empty" class="hint" style="display:none;">
+      No geolocated inspections yet. Inspections get a marker once an aircraft
+      GPS sample (POST /api/telemetry from the local collector) is available at
+      capture time. Analysis still works without GPS &mdash; those inspections
+      just don't appear on the map.
+    </p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+  <script>
+    // Fully offline: no cloud map provider. By default there is no basemap
+    // (markers are placed on a neutral pane and the view fits to them). To
+    // show geography offline, point this at a LOCAL tile server you host,
+    // e.g. "http://localhost:8080/tile/{z}/{x}/{y}.png".
+    const LOCAL_TILE_URL = "";
+
+    const map = L.map('map', { zoomControl: true });
+    map.setView([14.5995, 120.9842], 5);  // neutral default until markers load
+    if (LOCAL_TILE_URL) {
+      L.tileLayer(LOCAL_TILE_URL, { maxZoom: 22, attribution: 'Local tiles' }).addTo(map);
+    }
+
+    function popupHtml(p) {
+      const urls = p.urls || {};
+      const img = (p.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
+      const coords = (p.latitude != null && p.longitude != null)
+        ? `${p.latitude.toFixed(6)}, ${p.longitude.toFixed(6)}` : '\u2014';
+      const dq = (p.gps_time_delta_ms != null) ? ` (\u0394 ${p.gps_time_delta_ms} ms)` : '';
+      return `
+        <div class="map-popup">
+          <div class="map-popup-title">Inspection #${p.id}</div>
+          ${img ? `<a href="/inspection/${p.id}"><img src="${img}" class="map-popup-img"></a>` : ''}
+          <div class="map-popup-status ${p.has_crack ? 'is-crack' : 'is-ok'}">${p.status}</div>
+          <div class="map-popup-meta">Time: ${p.timestamp || '\u2014'}</div>
+          <div class="map-popup-meta">Source: ${p.source_label || '\u2014'}</div>
+          <div class="map-popup-meta">Location: ${coords}${dq}</div>
+          <a class="map-popup-link" href="/inspection/${p.id}">Open full result</a>
+        </div>`;
+    }
+
+    async function loadPoints() {
+      let data = { points: [] };
+      try {
+        const res = await fetch('/api/inspections/geo');
+        data = await res.json();
+      } catch (err) { /* offline-safe: show empty */ }
+
+      const pts = data.points || [];
+      document.getElementById('map-count').textContent = pts.length + ' geolocated';
+      document.getElementById('map-empty').style.display = pts.length ? 'none' : 'block';
+
+      const latlngs = [];
+      pts.forEach((p) => {
+        if (p.latitude == null || p.longitude == null) return;
+        const color = p.has_crack ? '#ef4444' : '#22c55e';
+        const marker = L.circleMarker([p.latitude, p.longitude], {
+          radius: 9, color: '#0b0f14', weight: 1.5, fillColor: color, fillOpacity: 0.9,
+        }).addTo(map);
+        marker.bindPopup(popupHtml(p), { maxWidth: 280 });
+        latlngs.push([p.latitude, p.longitude]);
+      });
+      if (latlngs.length === 1) {
+        map.setView(latlngs[0], 19);
+      } else if (latlngs.length > 1) {
+        map.fitBounds(latlngs, { padding: [40, 40] });
+      }
+    }
+
+    loadPoints();
+    setInterval(loadPoints, 5000);  // auto-refresh as new inspections arrive
+  </script>
+{% endblock %}

@@ -24,6 +24,9 @@ RUNTIME_PY_FILES = [
     "import_ledger.py",
     "bridge_status.py",
     "dji_photo_bridge.py",
+    "telemetry_store.py",
+    "flightrecord_parser.py",
+    "dji_gps_collector.py",
 ]
 
 
