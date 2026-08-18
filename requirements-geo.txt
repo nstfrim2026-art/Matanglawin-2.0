@@ -1,0 +1,16 @@
+# Optional dependencies for the Drone Crack Geotagging & Spatial Mapping module
+# (geotag_engine.py, exif_metadata.py, geotagging_colab_demo.ipynb).
+#
+# The base app in requirements.txt does NOT need any of these. The geotagging
+# core (DMS->DD, GSD, pixel->WGS84, GeoJSON assembly) runs on numpy + OpenCV,
+# which are already installed. Install these only to unlock the extras noted:
+#
+#   pip install -r requirements-geo.txt
+
+exifread>=3.0        # read GPS EXIF from drone JPEGs (Pillow is a fallback)
+pyproj>=3.4          # geodesic crack area + CRS reprojection (else falls back)
+folium>=0.14         # interactive Leaflet map in the Colab notebook
+
+# rasterio is only required to georeference against an orthomosaic GeoTIFF.
+# It pulls native GDAL libs, so it is left commented out by default:
+# rasterio>=1.3
