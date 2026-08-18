@@ -386,6 +386,54 @@ check confirms the exact original bytes reach the analysis input.
 
 ---
 
+## Offline aircraft-GPS geotagging & inspection map
+
+Tags each inspection with the **aircraft's** GPS position (nearest in time to
+the capture) and shows inspections on an **offline** map. Fully LAN-only — no
+cloud, no Google Maps, no DJI SDK. It is additive: the live POV, crack
+analysis, and operator result screen are unchanged, and analysis is **never
+blocked** when GPS is missing.
+
+> **Honest limitation (see `.kiro/specs/dji-gps-geotagging/investigation.md`):**
+> the DJI Fly `DJIFlightRecord_*.txt` for the Neo 2 is **AES-encrypted (log
+> v13+)** and its keychain must be fetched from DJI's cloud — so it **cannot
+> be decoded fully offline**. This is **not** a live-telemetry source offline.
+> The system is therefore **source-agnostic**: point the collector at any
+> offline telemetry your toolchain can produce (a decrypted CSV export, an
+> external GPS logger, etc.) and it works end-to-end. The encrypted `.txt` is
+> detected and reported as "not decodable offline" — never faked.
+
+How it fits together:
+
+```
+telemetry source (CSV/GPS)         PC (MatanglaWIN)
+   dji_gps_collector.py  ──POST /api/telemetry──▶  telemetry_store
+        (watch + parse, newest sample)              (nearest-in-time buffer)
+                                                          │
+   CAPTURE ─▶ analyze ─▶ inspection  ◀── nearest GPS to capture time
+                                    (gps_available, gps_time_delta_ms)
+                                                          │
+                                              /map  (offline Leaflet markers)
+```
+
+- `telemetry_store.py` — validated, time-buffered samples; **nearest-sample
+  matching** with `gps_available` + `gps_time_delta_ms` quality flags.
+- `flightrecord_parser.py` — pluggable parser: offline CSV/plaintext path +
+  honest detection of the encrypted DJI container.
+- `dji_gps_collector.py` — companion (Android/Termux or PC) that watches a
+  telemetry folder and POSTs the latest sample to the PC (address configurable
+  via `--server` / `MATANGLAWIN_TELEMETRY_SERVER`; **never hardcoded**).
+- `POST /api/telemetry` / `GET /api/telemetry/latest` — ingest + latest fix.
+- `/map` + `GET /api/inspections/geo` — offline Leaflet map (vendored under
+  `static/vendor/leaflet/`, no cloud tiles required) with **red = CRACK
+  DETECTED / green = NO CRACK DETECTED** markers and popups (images, result,
+  time, coordinates). Coordinates live on the map view, not the operator
+  result screen. For an offline basemap, point `LOCAL_TILE_URL` in
+  `templates/map.html` at a local tile server.
+
+Delivered mode: **POST-FLIGHT / SOURCE-AGNOSTIC TELEMETRY (offline)** — not
+live FlightRecord telemetry, which is not possible offline for the Neo 2.
+
 ## Drone crack geotagging & spatial mapping (optional module)
 
 An offline/Colab layer that turns pixel-space crack segmentations into

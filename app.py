@@ -89,6 +89,7 @@ from detector import (
     DEFAULT_UNSHARP,
 )
 from import_ledger import ImportLedger, hash_bytes
+from telemetry_store import TelemetryStore
 from inference_core import DEFAULT_REFINE, get_model
 from inspection_db import InspectionDB
 from inspection_service import InspectionService, InvalidImageError
@@ -216,6 +217,10 @@ _lock_obj = None
 # Cheap to construct, so it is a plain module-level singleton.
 bridge_status = BridgeStatus()
 
+# Latest aircraft telemetry (offline DJI GPS geotagging). Samples arrive at
+# POST /api/telemetry; captures are stamped with the nearest sample in time.
+telemetry_store = TelemetryStore()
+
 
 def _get_lock():
     global _lock_obj
@@ -240,7 +245,8 @@ def get_service() -> InspectionService:
         with _get_lock():
             if _service is None:
                 _service = InspectionService(
-                    get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS, **detector_config()
+                    get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS,
+                    telemetry_store=telemetry_store, **detector_config()
                 )
     return _service
 
@@ -357,6 +363,12 @@ def inspections_page():
     return render_template("inspections.html")
 
 
+@app.route("/map", methods=["GET"])
+def map_page():
+    """Offline inspection map (locally vendored Leaflet, no cloud provider)."""
+    return render_template("map.html")
+
+
 @app.route("/health", methods=["GET"])
 def health():
     try:
@@ -383,11 +395,12 @@ def api_inspect():
     if not allowed_file(file.filename):
         return jsonify({"error": "unsupported file type"}), 400
 
+    captured_at = request.form.get("captured_at") or request.headers.get("X-Captured-At")
     ext = Path(secure_filename(file.filename)).suffix.lower()
     tmp_path = UPLOAD_TMP_DIR / f"{uuid.uuid4().hex}{ext}"
     file.save(tmp_path)
     try:
-        record = get_service().analyze_file(str(tmp_path), source="upload")
+        record = get_service().analyze_file(str(tmp_path), source="upload", captured_at=captured_at)
     except InvalidImageError:
         return jsonify({"error": "invalid or corrupt image"}), 400
     except Exception as exc:  # noqa: BLE001
@@ -442,11 +455,12 @@ def api_import():
     ext = Path(secure_filename(filename)).suffix.lower() if filename else ""
     if ext not in ALLOWED_EXTS:
         ext = ".jpg"
+    captured_at = request.headers.get("X-Captured-At") or request.args.get("captured_at")
     tmp_path = IMPORT_TMP_DIR / f"{uuid.uuid4().hex}{ext}"
     try:
         tmp_path.write_bytes(data)
         log.info("[MATANGLAWIN] Inspection started")
-        record = get_service().analyze_file(str(tmp_path), source="import")
+        record = get_service().analyze_file(str(tmp_path), source="import", captured_at=captured_at)
     except InvalidImageError:
         log.warning("[PHOTO BRIDGE] Rejected: not a readable image: %s", filename or digest[:12])
         return jsonify({"error": "invalid or corrupt image"}), 400
@@ -516,6 +530,64 @@ def api_inspections():
     records = db.list_inspections(limit=limit)
     items = [_record_payload(r) for r in records]
     return jsonify({"count": db.count(), "inspections": items})
+
+
+# ===========================================================================
+# Aircraft telemetry (offline DJI GPS geotagging)
+# ===========================================================================
+@app.route("/api/telemetry", methods=["POST"])
+def api_telemetry():
+    """
+    Ingest one aircraft GPS sample from the local collector (LAN only).
+    Body JSON: {latitude, longitude, altitude_m?, timestamp?, source?}.
+    The latest valid sample is retained in memory for capture association.
+    Invalid samples are rejected with 400 but never crash the server.
+    """
+    data = request.get_json(silent=True) or {}
+    sample = telemetry_store.add(
+        latitude=data.get("latitude"),
+        longitude=data.get("longitude"),
+        altitude_m=data.get("altitude_m"),
+        timestamp=data.get("timestamp"),
+        source=data.get("source", "dji_flight_record"),
+    )
+    if sample is None:
+        return jsonify({"ok": False, "error": "invalid telemetry sample"}), 400
+    return jsonify({"ok": True, "buffered": telemetry_store.stats()["buffered"]})
+
+
+@app.route("/api/telemetry/latest", methods=["GET"])
+def api_telemetry_latest():
+    """Latest aircraft position + staleness (for internal/debug views)."""
+    latest, stale = telemetry_store.latest()
+    stats = telemetry_store.stats()
+    return jsonify({
+        "available": latest is not None,
+        "stale": stale,
+        "latest": latest.to_dict() if latest else None,
+        "buffered": stats["buffered"],
+        "received": stats["received"],
+        "rejected": stats["rejected"],
+    })
+
+
+@app.route("/api/inspections/geo", methods=["GET"])
+def api_inspections_geo():
+    """
+    Points for the offline map: geolocated inspections only. Coordinates
+    live here (map view), not in the operator result screen. Returns a
+    compact point list plus image URLs for marker popups.
+    """
+    db = get_db()
+    records = db.list_inspections(limit=1000)
+    points = []
+    for r in records:
+        if r.latitude is None or r.longitude is None or not r.gps_available:
+            continue
+        m = r.to_map()
+        m["urls"] = _inspection_urls(r)
+        points.append(m)
+    return jsonify({"count": len(points), "points": points})
 
 
 def _send_record_image(inspection_id, which):

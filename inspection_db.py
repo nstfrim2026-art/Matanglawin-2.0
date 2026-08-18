@@ -15,11 +15,15 @@ Columns (exactly the inspection-history fields the spec calls for):
     original_image_path      - the untouched photo
     highlighted_image_path   - the red-highlighted photo
     num_instances - internal-only crack count (NEVER surfaced to the UI)
+    latitude/longitude/altitude_m - aircraft position at capture (nullable)
+    gps_available / gps_time_delta_ms / gps_source / captured_at
+                  - geotag quality metadata (nullable)
 
-Deliberately absent (per the spec's "must not appear" list): confidence,
-bounding boxes, crack-only images, GPS, PDF reports, or any other model
-metric. ``to_dict()`` returns only what the UI is allowed to show, so no
-prohibited value can leak into the API/website.
+``to_dict()`` returns only what the OPERATOR UI is allowed to show
+(status/source/timestamp) and still omits confidence, counts, and
+coordinates. The offline map uses ``to_map()`` instead, which adds the
+stored latitude/longitude so inspections can be placed as markers - the
+coordinates never leak into the operator's result screen.
 
 This module has no Flask/YOLO dependency; it only needs the standard
 library (sqlite3), so it's trivial to unit test in isolation. A tiny
@@ -47,7 +51,14 @@ CREATE TABLE IF NOT EXISTS inspections (
     source TEXT NOT NULL DEFAULT 'upload',
     original_image_path TEXT,
     highlighted_image_path TEXT,
-    num_instances INTEGER NOT NULL DEFAULT 0
+    num_instances INTEGER NOT NULL DEFAULT 0,
+    latitude REAL,
+    longitude REAL,
+    altitude_m REAL,
+    gps_available INTEGER NOT NULL DEFAULT 0,
+    gps_time_delta_ms REAL,
+    gps_source TEXT,
+    captured_at TEXT
 );
 """
 
@@ -58,6 +69,13 @@ _EXPECTED_COLUMNS = {
     "original_image_path": "TEXT",
     "highlighted_image_path": "TEXT",
     "num_instances": "INTEGER NOT NULL DEFAULT 0",
+    "latitude": "REAL",
+    "longitude": "REAL",
+    "altitude_m": "REAL",
+    "gps_available": "INTEGER NOT NULL DEFAULT 0",
+    "gps_time_delta_ms": "REAL",
+    "gps_source": "TEXT",
+    "captured_at": "TEXT",
 }
 
 
@@ -70,6 +88,13 @@ class InspectionRecord:
     original_image_path: Optional[str] = None
     highlighted_image_path: Optional[str] = None
     num_instances: int = 0
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    altitude_m: Optional[float] = None
+    gps_available: bool = False
+    gps_time_delta_ms: Optional[float] = None
+    gps_source: Optional[str] = None
+    captured_at: Optional[str] = None
 
     @property
     def has_crack(self) -> bool:
@@ -94,6 +119,24 @@ class InspectionRecord:
             "source": self.source,
             "source_label": self.source_label,
         }
+
+    def to_map(self) -> dict:
+        """
+        View for the offline inspection MAP: the operator-safe fields plus
+        the stored aircraft coordinates + geotag quality. Used only by the
+        map/points API, never by the operator result screen.
+        """
+        d = self.to_dict()
+        d.update(
+            latitude=self.latitude,
+            longitude=self.longitude,
+            altitude_m=self.altitude_m,
+            gps_available=bool(self.gps_available),
+            gps_time_delta_ms=self.gps_time_delta_ms,
+            gps_source=self.gps_source,
+            captured_at=self.captured_at,
+        )
+        return d
 
 
 class InspectionDB:
@@ -144,14 +187,23 @@ class InspectionDB:
         original_image_path: Optional[str] = None,
         highlighted_image_path: Optional[str] = None,
         num_instances: int = 0,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        altitude_m: Optional[float] = None,
+        gps_available: bool = False,
+        gps_time_delta_ms: Optional[float] = None,
+        gps_source: Optional[str] = None,
+        captured_at: Optional[str] = None,
     ) -> int:
         with self._cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO inspections
                     (timestamp, status, source, original_image_path,
-                     highlighted_image_path, num_instances)
-                VALUES (?, ?, ?, ?, ?, ?)
+                     highlighted_image_path, num_instances,
+                     latitude, longitude, altitude_m, gps_available,
+                     gps_time_delta_ms, gps_source, captured_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -160,6 +212,13 @@ class InspectionDB:
                     original_image_path,
                     highlighted_image_path,
                     num_instances,
+                    latitude,
+                    longitude,
+                    altitude_m,
+                    1 if gps_available else 0,
+                    gps_time_delta_ms,
+                    gps_source,
+                    captured_at,
                 ),
             )
             return cur.lastrowid
@@ -212,4 +271,11 @@ def _row_to_record(row: sqlite3.Row) -> InspectionRecord:
         original_image_path=row["original_image_path"] if "original_image_path" in keys else None,
         highlighted_image_path=row["highlighted_image_path"] if "highlighted_image_path" in keys else None,
         num_instances=row["num_instances"] if "num_instances" in keys and row["num_instances"] is not None else 0,
+        latitude=row["latitude"] if "latitude" in keys else None,
+        longitude=row["longitude"] if "longitude" in keys else None,
+        altitude_m=row["altitude_m"] if "altitude_m" in keys else None,
+        gps_available=bool(row["gps_available"]) if "gps_available" in keys and row["gps_available"] is not None else False,
+        gps_time_delta_ms=row["gps_time_delta_ms"] if "gps_time_delta_ms" in keys else None,
+        gps_source=row["gps_source"] if "gps_source" in keys else None,
+        captured_at=row["captured_at"] if "captured_at" in keys else None,
     )

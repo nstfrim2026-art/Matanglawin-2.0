@@ -24,6 +24,7 @@
       <nav class="site-nav">
         <a href="{{ url_for('index') }}" class="{{ 'active' if active_nav == 'dashboard' else '' }}">Live Dashboard</a>
         <a href="{{ url_for('inspections_page') }}" class="{{ 'active' if active_nav == 'inspections' else '' }}">Inspections</a>
+        <a href="{{ url_for('map_page') }}" class="{{ 'active' if active_nav == 'map' else '' }}">Map</a>
         <a href="{{ url_for('upload_page') }}" class="nav-secondary {{ 'active' if active_nav == 'upload' else '' }}">Manual Upload</a>
       </nav>
     </div>
