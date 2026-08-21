@@ -90,6 +90,7 @@ from detector import (
 )
 from import_ledger import ImportLedger, hash_bytes
 from telemetry_store import TelemetryStore
+from srt_watcher import SrtWatcher
 from inference_core import DEFAULT_REFINE, get_model
 from inspection_db import InspectionDB
 from inspection_service import InspectionService, InvalidImageError
@@ -117,6 +118,30 @@ IMPORT_LEDGER_PATH = DATA_DIR / "import_http_state.json"  # cross-restart de-dup
 DB_PATH = DATA_DIR / "inspections.db"
 for d in (UPLOAD_TMP_DIR, IMPORT_TMP_DIR, INSPECTIONS_DIR, IMPORT_DIR):
     d.mkdir(parents=True, exist_ok=True)
+
+
+def _configured_dirs(env_name: str, default: str = "") -> list:
+    """
+    Resolve one-or-more directories from an env var (os.pathsep-separated),
+    expanding ~ and environment vars like %USERPROFILE% / $HOME. Never
+    hardcodes a username. Falls back to `default` when unset.
+    """
+    raw = os.environ.get(env_name, "").strip()
+    parts = raw.split(os.pathsep) if raw else ([default] if default else [])
+    out = []
+    for p in parts:
+        p = p.strip()
+        if p:
+            out.append(os.path.expanduser(os.path.expandvars(p)))
+    return out
+
+
+# Folders watched for DJI SRT (Video Subtitles) telemetry files. Default is a
+# local folder next to the app; point MATANGLAWIN_SRT_DIR (and optionally
+# MATANGLAWIN_CAPTURE_DIR) at wherever your SRT files land - e.g.
+#   set MATANGLAWIN_SRT_DIR=%USERPROFILE%\Videos\DJI
+SRT_DIRS = _configured_dirs("MATANGLAWIN_SRT_DIR", str(DATA_DIR / "srt")) + \
+    _configured_dirs("MATANGLAWIN_CAPTURE_DIR", "")
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -218,8 +243,10 @@ _lock_obj = None
 bridge_status = BridgeStatus()
 
 # Latest aircraft telemetry (offline DJI GPS geotagging). Samples arrive at
-# POST /api/telemetry; captures are stamped with the nearest sample in time.
+# POST /api/telemetry AND from the SRT watcher; captures are stamped with the
+# nearest sample in time.
 telemetry_store = TelemetryStore()
+_srt_watcher: SrtWatcher = None
 
 
 def _get_lock():
@@ -258,6 +285,15 @@ def get_watcher() -> PhotoImportWatcher:
             if _watcher is None:
                 _watcher = PhotoImportWatcher(str(IMPORT_DIR), get_service())
     return _watcher
+
+
+def get_srt_watcher() -> SrtWatcher:
+    global _srt_watcher
+    if _srt_watcher is None:
+        with _get_lock():
+            if _srt_watcher is None:
+                _srt_watcher = SrtWatcher(SRT_DIRS, telemetry_store, db=get_db())
+    return _srt_watcher
 
 
 def get_import_ledger() -> ImportLedger:
@@ -561,6 +597,7 @@ def api_telemetry_latest():
     """Latest aircraft position + staleness (for internal/debug views)."""
     latest, stale = telemetry_store.latest()
     stats = telemetry_store.stats()
+    srt_mode = _srt_watcher.mode if _srt_watcher is not None else "idle"
     return jsonify({
         "available": latest is not None,
         "stale": stale,
@@ -568,6 +605,7 @@ def api_telemetry_latest():
         "buffered": stats["buffered"],
         "received": stats["received"],
         "rejected": stats["rejected"],
+        "srt_mode": srt_mode,
     })
 
 
@@ -684,6 +722,15 @@ def main():
         print(f"  Watching for DJI photos in: {IMPORT_DIR}")
     except Exception as exc:  # noqa: BLE001 - watcher failure must not stop the web app
         print(f"  WARNING: photo import watcher failed to start: {exc}")
+
+    # Start watching for DJI SRT (Video Subtitles) telemetry. Independent of
+    # the photo path and the live POV - it only feeds aircraft coordinates
+    # and backfills inspections' locations when SRT files appear.
+    try:
+        get_srt_watcher().start()
+        print(f"  Watching for DJI SRT telemetry in: {', '.join(SRT_DIRS) or '(none configured)'}")
+    except Exception as exc:  # noqa: BLE001 - never block the app on telemetry
+        print(f"  WARNING: SRT telemetry watcher failed to start: {exc}")
 
     cfg = detector_config()
     print(

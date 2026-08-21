@@ -177,6 +177,7 @@ body {
 }
 .legend-crack { background: var(--accent); }
 .legend-ok { background: var(--ok); }
+.legend-drone { background: #3b82f6; }
 .map-popup { color: #111; min-width: 200px; }
 .map-popup-title { font-weight: 800; margin-bottom: 6px; }
 .map-popup-img { width: 100%; border-radius: 6px; display: block; margin-bottom: 6px; }

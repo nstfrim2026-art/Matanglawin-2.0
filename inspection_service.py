@@ -203,7 +203,10 @@ class InspectionService:
         # yields gps_available=False.
         gps = {"gps_available": False, "gps_time_delta_ms": None, "latitude": None,
                "longitude": None, "altitude_m": None, "gps_source": None}
-        captured_iso = None
+        # ALWAYS record the capture time (even with no telemetry yet), so an
+        # SRT file that appears later can backfill this inspection's location
+        # by nearest-timestamp match (Mode B).
+        captured_iso = captured_at if isinstance(captured_at, str) and captured_at else ts_str
         if self.telemetry_store is not None:
             try:
                 import telemetry_store as _ts
@@ -212,7 +215,6 @@ class InspectionService:
                     capture_ms = now * 1000.0
                 match = self.telemetry_store.match_for_capture(capture_ms)
                 gps.update({k: match[k] for k in gps})
-                captured_iso = captured_at if isinstance(captured_at, str) else ts_str
             except Exception:  # noqa: BLE001 - geotag is best-effort only
                 pass
 

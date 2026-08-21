@@ -8,7 +8,8 @@
       <h1>Inspection Map</h1>
       <p class="lede">
         Offline map of geolocated inspections. <span class="legend-dot legend-crack"></span>
-        CRACK DETECTED &nbsp; <span class="legend-dot legend-ok"></span> NO CRACK DETECTED.
+        CRACK DETECTED &nbsp; <span class="legend-dot legend-ok"></span> NO CRACK DETECTED &nbsp;
+        <span class="legend-dot legend-drone"></span> current drone.
         Click a marker for the images, result, and time.
       </p>
     </div>
@@ -87,7 +88,33 @@
       }
     }
 
+    // --- current drone position (blue), only when a FRESH sample exists ---
+    let droneMarker = null;
+    async function refreshDrone() {
+      let info = null;
+      try {
+        info = await (await fetch('/api/telemetry/latest')).json();
+      } catch (err) { info = null; }
+      const ok = info && info.available && !info.stale && info.latest
+                 && info.latest.latitude != null && info.latest.longitude != null;
+      if (!ok) {
+        if (droneMarker) { map.removeLayer(droneMarker); droneMarker = null; }
+        return;
+      }
+      const ll = [info.latest.latitude, info.latest.longitude];
+      if (!droneMarker) {
+        droneMarker = L.circleMarker(ll, {
+          radius: 8, color: '#0b0f14', weight: 2, fillColor: '#3b82f6', fillOpacity: 1,
+        }).addTo(map);
+        droneMarker.bindTooltip('Current drone position', { direction: 'top' });
+      } else {
+        droneMarker.setLatLng(ll);
+      }
+    }
+
     loadPoints();
-    setInterval(loadPoints, 5000);  // auto-refresh as new inspections arrive
+    refreshDrone();
+    setInterval(loadPoints, 5000);   // auto-refresh as new inspections arrive
+    setInterval(refreshDrone, 2000); // fresher cadence for the live drone dot
   </script>
 {% endblock %}

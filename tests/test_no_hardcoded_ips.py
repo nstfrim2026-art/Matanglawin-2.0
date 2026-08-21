@@ -31,6 +31,8 @@ RUNTIME_PY_FILES = [
     "telemetry_store.py",
     "flightrecord_parser.py",
     "dji_gps_collector.py",
+    "srt_telemetry.py",
+    "srt_watcher.py",
 ]
 
 PRIVATE_IP_PATTERN = re.compile(
