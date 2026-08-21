@@ -394,14 +394,41 @@ cloud, no Google Maps, no DJI SDK. It is additive: the live POV, crack
 analysis, and operator result screen are unchanged, and analysis is **never
 blocked** when GPS is missing.
 
-> **Honest limitation (see `.kiro/specs/dji-gps-geotagging/investigation.md`):**
+### Authoritative source: DJI SRT (Video Subtitles) — parses fully offline
+
+Enable **Video Subtitles** in DJI Fly. DJI writes a plaintext `.SRT` next to
+each recording with per-frame `latitude`/`longitude`/timestamp. Unlike the
+encrypted FlightRecord (see below), SRT is **plaintext**, so MatanglaWIN parses
+it **offline**. The app watches for SRT files automatically — no manual parse
+command, no upload.
+
+- `srt_telemetry.py` — robust DJI SRT parser (bracketed `[latitude: …]`, loose,
+  and `GPS(lon,lat,…)` variants; timezone-aware; partial/malformed-block safe).
+- `srt_watcher.py` — in-process watcher over `MATANGLAWIN_SRT_DIR` /
+  `MATANGLAWIN_CAPTURE_DIR` (os.pathsep-separated; `~`, `%USERPROFILE%`, `$HOME`
+  expanded — no hardcoded username). It feeds the telemetry store and
+  **backfills** an inspection's coordinates when its SRT appears after capture.
+- Two modes, **detected honestly** (never assumed) and reported via
+  `/api/telemetry/latest` `srt_mode`:
+  - `AUTOMATED LIVE AIRCRAFT POSITION` — SRT grows during recording (live).
+  - `AUTOMATED POST-CAPTURE GEOTAGGING` — SRT appears after recording; captures
+    save first, then markers appear automatically once telemetry is matched.
+- Config: `MATANGLAWIN_SRT_DIR` (e.g. `%USERPROFILE%\Videos\DJI`),
+  `MATANGLAWIN_CAPTURE_DIR`, optional `MATANGLAWIN_SRT_TZ_OFFSET_MIN` for naive
+  SRT timestamps. Design: `.kiro/specs/dji-gps-geotagging/design-srt.md`.
+
+The map shows **red = CRACK / green = NO CRACK / blue = current drone** (blue
+only while a fresh sample exists; it hides when telemetry goes stale).
+
+### Also supported: generic telemetry ingest (external GPS / CSV)
+
+> **On the FlightRecord (see `.kiro/specs/dji-gps-geotagging/investigation.md`):**
 > the DJI Fly `DJIFlightRecord_*.txt` for the Neo 2 is **AES-encrypted (log
 > v13+)** and its keychain must be fetched from DJI's cloud — so it **cannot
-> be decoded fully offline**. This is **not** a live-telemetry source offline.
-> The system is therefore **source-agnostic**: point the collector at any
-> offline telemetry your toolchain can produce (a decrypted CSV export, an
-> external GPS logger, etc.) and it works end-to-end. The encrypted `.txt` is
-> detected and reported as "not decodable offline" — never faked.
+> be decoded fully offline**, and is NOT used as the source. The generic
+> `POST /api/telemetry` ingest remains available for any offline source (an
+> external GPS logger, a decrypted CSV, etc.); the encrypted `.txt` is detected
+> and reported as "not decodable offline" — never faked.
 
 How it fits together:
 

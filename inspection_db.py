@@ -245,6 +245,52 @@ class InspectionDB:
         results = self.list_inspections(limit=1, newest_first=True)
         return results[0] if results else None
 
+    def update_geo(
+        self,
+        inspection_id: int,
+        latitude: float,
+        longitude: float,
+        gps_time_delta_ms: Optional[float] = None,
+        gps_source: Optional[str] = None,
+        gps_available: bool = True,
+    ) -> bool:
+        """
+        Backfill / update an inspection's aircraft location (e.g. once an SRT
+        telemetry file appears after capture - Mode B). Returns True if a row
+        was updated.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                UPDATE inspections
+                   SET latitude = ?, longitude = ?, gps_available = ?,
+                       gps_time_delta_ms = ?, gps_source = ?
+                 WHERE id = ?
+                """,
+                (latitude, longitude, 1 if gps_available else 0,
+                 gps_time_delta_ms, gps_source, inspection_id),
+            )
+            return cur.rowcount > 0
+
+    def list_pending_geo(self, limit: int = 500) -> List[InspectionRecord]:
+        """
+        Inspections that still need a location but have a capture time to
+        match against (gps_available = 0 AND captured_at present). Used by
+        the SRT watcher to backfill coordinates when telemetry arrives late.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM inspections
+                 WHERE (gps_available = 0 OR gps_available IS NULL)
+                   AND captured_at IS NOT NULL AND captured_at != ''
+                 ORDER BY id DESC LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+        return [_row_to_record(r) for r in rows]
+
     def count(self) -> int:
         with self._cursor() as cur:
             cur.execute("SELECT COUNT(*) AS c FROM inspections")

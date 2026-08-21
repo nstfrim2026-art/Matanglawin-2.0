@@ -14,3 +14,12 @@ folium>=0.14         # interactive Leaflet map in the Colab notebook
 # rasterio is only required to georeference against an orthomosaic GeoTIFF.
 # It pulls native GDAL libs, so it is left commented out by default:
 # rasterio>=1.3
+
+
+# --- DJI SRT (Video Subtitles) geotagging ---
+# The SRT parser (srt_telemetry.py) and watcher (srt_watcher.py) are pure
+# standard library and need NOTHING extra - SRT is plaintext and parses
+# fully offline. The community packages below are optional references only
+# (jetervaz/dji-telemetry, bhanurp/dji-flight); they are NOT required and
+# are not used at runtime:
+# dji-telemetry   # optional: alternative DJI SRT parser (reference)
