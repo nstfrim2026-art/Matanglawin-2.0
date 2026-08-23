@@ -1,8 +1,9 @@
 """
-Tests for the telemetry + map endpoints in app.py: /api/telemetry ingest,
+Tests for the telemetry endpoints in app.py: /api/telemetry ingest,
 /api/telemetry/latest, capture->nearest-GPS association into an inspection,
-/api/inspections/geo marker generation, missing-GPS behavior, and that the
-operator result view still hides coordinates. Segmentation is stubbed.
+missing-GPS behavior, and that the capture coordinates are now surfaced in
+the inspection details (payload + result page). The map has been removed.
+Segmentation is stubbed.
 """
 
 import io
@@ -66,58 +67,96 @@ def test_post_telemetry_invalid_rejected(client):
     assert client.get("/api/telemetry/latest").get_json()["available"] is False
 
 
-# -- capture -> nearest-GPS association ------------------------------
+def _import(client, value, captured_at=None, filename="DJI_x.jpg"):
+    """POST one automatic-import photo (unique bytes per `value`)."""
+    headers = {"X-Filename": filename}
+    if captured_at:
+        headers["X-Captured-At"] = captured_at
+    return client.post("/api/import", data=stubs.jpg_bytes(value=value),
+                       content_type="image/jpeg", headers=headers)
 
-def test_capture_is_geotagged_with_nearest_sample(client):
+
+# -- AUTOMATIC capture -> nearest fresh-GPS association --------------
+
+def test_automatic_capture_is_geotagged_with_fresh_sample(client):
     stubs.stub_one_crack(inference_core)
-    # aircraft sample at the capture instant
+    # aircraft/phone sample at the capture instant
     client.post("/api/telemetry", json={
         "latitude": 7.123456, "longitude": 125.654321, "altitude_m": 43.2, "timestamp": _TS})
-    # capture with the same timestamp
-    j = client.post("/api/inspect", data={
-        "image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg"),
-        "captured_at": _TS,
-    }, content_type="multipart/form-data").get_json()
+    # automatic capture (DJI import) with the same timestamp -> fresh match
+    j = _import(client, value=101, captured_at=_TS).get_json()
     assert j["status"] == "CRACK DETECTED"
-    # operator result view must NOT expose coordinates
-    assert "latitude" not in j and "longitude" not in j
+    assert j["source"] == "import"
+    assert j["gps_available"] is True
+    assert abs(j["latitude"] - 7.123456) < 1e-6
+    assert abs(j["longitude"] - 125.654321) < 1e-6
 
-    geo = client.get("/api/inspections/geo").get_json()
-    assert geo["count"] == 1
-    pt = geo["points"][0]
-    assert pt["id"] == j["id"]
-    assert abs(pt["latitude"] - 7.123456) < 1e-6
-    assert pt["gps_available"] is True
-    assert pt["gps_time_delta_ms"] is not None
-    assert pt["has_crack"] is True
-    assert "highlighted" in pt["urls"]
+    # ...and rendered on the inspection result page in the labeled readout.
+    body = client.get(f"/inspection/{j['id']}").data.decode()
+    assert "Latitude" in body and "Longitude" in body
+    assert "7.123456&deg; N" in body
+    assert "125.654321&deg; E" in body
 
 
-def test_capture_without_gps_still_works_and_has_no_marker(client):
+def test_automatic_capture_without_fresh_gps_has_none(client):
     stubs.stub_no_crack(inference_core)
-    j = client.post("/api/inspect", data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
-                    content_type="multipart/form-data").get_json()
+    # analysis still runs with no telemetry at all
+    j = _import(client, value=102).get_json()
     assert j["status"] == "NO CRACK DETECTED"       # analysis NOT blocked by missing GPS
-    assert client.get("/api/inspections/geo").get_json()["count"] == 0
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
+    body = client.get(f"/inspection/{j['id']}").data.decode()
+    assert "Latitude" in body and "Not recorded" in body
 
 
-def test_stale_far_sample_not_attached(client):
+def test_stale_gps_is_not_reused_after_colota_stops(client):
+    """Colota sent a fix, then stopped: a later automatic capture must NOT
+    reuse that old position (freshness window in match_for_capture)."""
+    import app as appmod
     stubs.stub_no_crack(inference_core)
-    # telemetry far in the past relative to capture (default match window 2 s)
+    # A fix arrives while Colota is on.
     client.post("/api/telemetry", json={
         "latitude": 7.1, "longitude": 125.6, "timestamp": "2020-01-01T00:00:00Z"})
-    client.post("/api/inspect", data={
+    assert client.get("/api/telemetry/latest").get_json()["available"] is True
+    # Colota is now OFF; a NEW capture happens much later (2026). The last
+    # known 2020 fix is far outside the match window -> not reused.
+    j = _import(client, value=103, captured_at=_TS).get_json()
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
+    rec = appmod.get_db().get_inspection(j["id"])
+    assert rec.gps_source is None
+
+
+# -- MANUAL upload is independent of the phone GPS -------------------
+
+def test_manual_upload_never_gets_gps_even_with_active_colota(client):
+    """The critical fix: a manual upload must NOT inherit the current/latest
+    Colota position, even when a fresh sample exists at the same instant."""
+    import app as appmod
+    stubs.stub_one_crack(inference_core)
+    # Colota is actively sending a valid fix right now.
+    client.post("/api/telemetry", json={
+        "latitude": 7.123456, "longitude": 125.654321, "timestamp": _TS})
+    # Manual upload with a captured_at that exactly matches the fresh sample.
+    j = client.post("/api/inspect", data={
         "image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg"), "captured_at": _TS,
-    }, content_type="multipart/form-data")
-    assert client.get("/api/inspections/geo").get_json()["count"] == 0
+    }, content_type="multipart/form-data").get_json()
+    assert j["status"] == "CRACK DETECTED"          # analysis still works
+    assert j["source"] == "upload"
+    # No GPS whatsoever on a manual upload.
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
+    rec = appmod.get_db().get_inspection(j["id"])
+    assert rec.gps_source is None
+    assert rec.captured_at is None                  # not eligible for SRT backfill
+    body = client.get(f"/inspection/{j['id']}").data.decode()
+    assert "Not recorded" in body
 
 
-# -- map page --------------------------------------------------------
+# -- map removed -----------------------------------------------------
 
-def test_map_page_renders(client):
-    resp = client.get("/map")
-    assert resp.status_code == 200
-    body = resp.data.decode()
-    assert "Inspection Map" in body
-    assert "leaflet" in body.lower()
-    assert "/api/inspections/geo" in body
+def test_map_routes_are_gone(client):
+    # The map feature (page, tiles, geo API) was removed entirely.
+    assert client.get("/map").status_code == 404
+    assert client.get("/api/inspections/geo").status_code == 404
+    assert client.get("/maps/5/10/12.png").status_code == 404

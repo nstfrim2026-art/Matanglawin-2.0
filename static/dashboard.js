@@ -27,29 +27,70 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+// Coordinate + timestamp formatting shared with the result page look:
+//   latitude  -> "7.071234\u00B0 N" / "\u00B0 S"
+//   longitude -> "125.612345\u00B0 E" / "\u00B0 W"
+//   timestamp -> "2026-08-23 15:20"
+function fmtLat(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'N' : 'S'); }
+function fmtLon(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'E' : 'W'); }
+function fmtDateTime(ts) { return ts ? String(ts).replace('T', ' ').slice(0, 16) : '\u2014'; }
+
 // ---------------------------------------------------------------- network
-async function refreshNetwork() {
+// We only need the WebRTC URL for the live-feed iframe; the operator-facing
+// connection panel was removed, so nothing else is displayed here.
+async function refreshWebrtcUrl() {
   try {
     const res = await fetch('/api/network');
     const info = await res.json();
-    setText('net-host-ip', info.host_ip || 'Unavailable (no network detected)');
-    setText('net-rtmp-address', info.rtmp_address || 'Connect to a network first');
-    setText('net-stream-key', info.stream_key || '\u2014');
-    // Remember the WebRTC URL; the iframe is only actually loaded once a
-    // publisher is confirmed LIVE (see setPovBadge), so an offline stream
-    // never shows a broken player - the clean dark placeholder stays up.
     webrtcUrl = info.webrtc_url || null;
   } catch (err) {
-    setText('net-host-ip', 'Error loading network info');
+    /* offline-safe: keep the clean placeholder */
   }
+}
 
+// -------------------------------------------------- crack beep + alert
+// A short WebAudio beep (no audio file needed - fully offline) plus a
+// prominent, auto-hiding notification. Fires once per NEWLY completed crack
+// inspection - never per refresh, never when there is no crack.
+let audioCtx = null;
+function _unlockAudio() {
   try {
-    const res = await fetch('/api/mediamtx/status');
-    const status = await res.json();
-    setText('net-mediamtx', status.reachable ? 'Reachable' : 'Not reachable');
-  } catch (err) {
-    setText('net-mediamtx', 'Unknown');
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* audio unavailable */ }
+}
+document.addEventListener('click', _unlockAudio);
+document.addEventListener('keydown', _unlockAudio);
+
+function beep() {
+  try {
+    _unlockAudio();
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'square';
+    o.frequency.value = 880;
+    o.connect(g); g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.start(t);
+    o.stop(t + 0.2);
+  } catch (e) {
+    /* audio blocked (no user gesture yet) - the visual alert still shows */
   }
+}
+
+let crackAlertTimer = null;
+function showCrackAlert(rec) {
+  const el = document.getElementById('crack-alert');
+  if (!el) return;
+  const sub = document.getElementById('crack-alert-sub');
+  if (sub) sub.textContent = 'Inspection #' + rec.id;
+  el.style.display = 'flex';
+  if (crackAlertTimer) clearTimeout(crackAlertTimer);
+  crackAlertTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
 }
 
 // -------------------------------------------------------------- POV badge
@@ -136,31 +177,38 @@ function renderLatest(rec) {
     banner.textContent = rec.status;
     banner.className = 'status-banner ' + (rec.has_crack ? 'status-crack' : 'status-ok');
   }
-  setText('latest-timestamp', rec.timestamp);
+  setText('latest-datetime', fmtDateTime(rec.timestamp));
   setText('latest-source', rec.source_label || (rec.source === 'import' ? 'DJI import' : 'Manual upload'));
 
-  const urls = rec.urls || {};
-  const original = document.getElementById('latest-original');
-  // Cache-bust per inspection id so the browser always shows the new photo.
-  if (original && urls.original) original.src = urls.original + '?v=' + rec.id;
+  // GPS location of the capture (shown once the photo has been processed).
+  // Only present when an aircraft/phone GPS sample was matched at capture time.
+  const hasGps = rec.gps_available && rec.latitude != null && rec.longitude != null;
+  setText('latest-lat', hasGps ? fmtLat(rec.latitude) : 'Not recorded');
+  setText('latest-lon', hasGps ? fmtLon(rec.longitude) : 'Not recorded');
 
-  const hlCol = document.getElementById('latest-highlighted-col');
-  const hl = document.getElementById('latest-highlighted');
-  if (rec.has_crack && urls.highlighted) {
-    if (hl) hl.src = urls.highlighted + '?v=' + rec.id;
-    if (hlCol) hlCol.style.display = 'block';
-  } else if (hlCol) {
-    hlCol.style.display = 'none';
-  }
+  // Single analyzed photo: the red-highlighted version when a crack was found,
+  // otherwise the plain capture. (No more duplicate original+highlighted pair.)
+  const urls = rec.urls || {};
+  const img = document.getElementById('latest-result');
+  const src = (rec.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
+  // Cache-bust per inspection id so the browser always shows the new photo.
+  if (img && src) img.src = src + '?v=' + rec.id;
+  setText('latest-caption', rec.has_crack ? 'Analyzed photo (crack highlighted)' : 'Analyzed photo');
 
   const view = document.getElementById('latest-view');
   if (view) view.href = `/inspection/${rec.id}`;
 
   // Automatic-update announcement: a new inspection arrived on its own.
+  // The block runs once per NEW inspection id, so a crack beeps exactly once
+  // (never on a refresh of the same result, never when there's no crack).
   if (rec.id !== lastInspectionId) {
     if (seenAnyInspection && lastInspectionId !== null) {
       const via = rec.source === 'import' ? 'DJI capture' : 'manual upload';
       showToast(`Analysis complete \u2014 new inspection #${rec.id} (${via}): ${rec.status}`);
+      if (rec.has_crack) {
+        beep();
+        showCrackAlert(rec);
+      }
     }
     lastInspectionId = rec.id;
     seenAnyInspection = true;
@@ -176,11 +224,27 @@ async function refreshLatest() {
   }
 }
 
+// -------------------------------------------------- summary counters
+// Total inspections / cracks detected / clear, straight from the DB. Polled
+// so the counters update automatically whenever a new inspection is created.
+async function refreshSummary() {
+  try {
+    const res = await fetch('/api/inspections/summary');
+    const s = await res.json();
+    setText('summary-total', s.total != null ? s.total : 0);
+    setText('summary-cracks', s.cracks != null ? s.cracks : 0);
+    setText('summary-clear', s.clear != null ? s.clear : 0);
+  } catch (err) {
+    /* leave last known counts on screen */
+  }
+}
+
 function refreshAll() {
-  refreshNetwork();
+  refreshWebrtcUrl();
   refreshPovStatus();
   refreshBridgeStatus();
   refreshLatest();
+  refreshSummary();
 }
 
 refreshAll();

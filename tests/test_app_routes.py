@@ -53,9 +53,11 @@ def test_dashboard_is_the_main_page(client):
 def test_dashboard_pov_is_clean_display_only(client):
     resp = client.get("/")
     body = resp.data.decode()
-    # The live POV explicitly states no AI overlay, and there is no
-    # bounding-box / confidence / FPS language anywhere on the page.
-    assert "shutter button" in body
+    # The shutter-capture workflow is still described (in the intro lede), but
+    # the redundant POV caption sentence was removed.
+    assert "shutter" in body.lower()
+    assert "monitoring only" not in body.lower()
+    # No bounding-box / confidence / FPS language anywhere on the page.
     for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only"):
         assert banned.lower() not in body.lower()
 
@@ -140,9 +142,9 @@ def test_api_inspect_crack_flow_serves_only_two_images(client):
     ).get_json()
 
     assert j["status"] == "CRACK DETECTED"
-    # Never leak prohibited fields.
-    for banned in ("confidence", "num_instances", "crack_image_names",
-                   "latitude", "longitude", "fps"):
+    # Never leak prohibited model metrics (coordinates are allowed - they are
+    # shown in the inspection details).
+    for banned in ("confidence", "num_instances", "crack_image_names", "fps"):
         assert banned not in j
     urls = j["urls"]
     assert set(urls.keys()) == {"original", "highlighted"}  # no 'cracks'
@@ -150,7 +152,7 @@ def test_api_inspect_crack_flow_serves_only_two_images(client):
     assert client.get(urls["highlighted"]).status_code == 200
 
 
-def test_result_page_crack_shows_both_images(client):
+def test_result_page_crack_shows_single_highlighted_image(client):
     stubs.stub_one_crack(inference_core)
     j = client.post(
         "/api/inspect",
@@ -158,10 +160,16 @@ def test_result_page_crack_shows_both_images(client):
         content_type="multipart/form-data",
     ).get_json()
     page = client.get(f"/inspection/{j['id']}")
+    body = page.data.decode()
     assert page.status_code == 200
-    assert b"CRACK DETECTED" in page.data
-    assert b"Original photo" in page.data
-    assert b"Red-highlighted" in page.data
+    assert "CRACK DETECTED" in body
+    # Exactly ONE analyzed image (the fix for the duplicate-image bug), and it
+    # points at the red-highlighted photo when a crack is present.
+    assert body.count('class="shot-img"') == 1
+    assert "Analyzed photo (crack highlighted)" in body
+    assert f"/api/inspection/{j['id']}/highlighted" in body
+    # crack feedback: pulsing banner class + audio hook are wired in
+    assert "status-alarm" in body and "AudioContext" in body
 
 
 def test_api_inspect_rejects_non_image(client):

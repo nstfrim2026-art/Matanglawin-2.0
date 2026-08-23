@@ -19,11 +19,10 @@ Columns (exactly the inspection-history fields the spec calls for):
     gps_available / gps_time_delta_ms / gps_source / captured_at
                   - geotag quality metadata (nullable)
 
-``to_dict()`` returns only what the OPERATOR UI is allowed to show
-(status/source/timestamp) and still omits confidence, counts, and
-coordinates. The offline map uses ``to_map()`` instead, which adds the
-stored latitude/longitude so inspections can be placed as markers - the
-coordinates never leak into the operator's result screen.
+``to_dict()`` returns what the OPERATOR UI is allowed to show
+(status/source/timestamp plus the capture latitude/longitude, which are
+displayed in the inspection details) and still omits confidence, crack
+counts, and every other model statistic.
 
 This module has no Flask/YOLO dependency; it only needs the standard
 library (sqlite3), so it's trivial to unit test in isolation. A tiny
@@ -58,9 +57,23 @@ CREATE TABLE IF NOT EXISTS inspections (
     gps_available INTEGER NOT NULL DEFAULT 0,
     gps_time_delta_ms REAL,
     gps_source TEXT,
-    captured_at TEXT
+    captured_at TEXT,
+    radius_m REAL,
+    capture_id TEXT
 );
 """
+
+# capture_id is the single identity of one physical capture, threaded through
+# the whole automatic pipeline (image save -> import -> service -> DB). A
+# partial UNIQUE index enforces "one capture -> one inspection" at the storage
+# layer: any second insert with the same capture_id fails, so duplicates are
+# impossible even under a race or two import transports. Manual uploads pass
+# capture_id = NULL (SQLite allows many NULLs in a UNIQUE index), so each
+# manual upload remains its own record.
+CAPTURE_ID_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_inspections_capture_id "
+    "ON inspections(capture_id) WHERE capture_id IS NOT NULL"
+)
 
 # Columns that may be missing from an older on-disk DB and need adding.
 _EXPECTED_COLUMNS = {
@@ -76,6 +89,8 @@ _EXPECTED_COLUMNS = {
     "gps_time_delta_ms": "REAL",
     "gps_source": "TEXT",
     "captured_at": "TEXT",
+    "radius_m": "REAL",
+    "capture_id": "TEXT",
 }
 
 
@@ -95,6 +110,8 @@ class InspectionRecord:
     gps_time_delta_ms: Optional[float] = None
     gps_source: Optional[str] = None
     captured_at: Optional[str] = None
+    radius_m: Optional[float] = None
+    capture_id: Optional[str] = None
 
     @property
     def has_crack(self) -> bool:
@@ -108,8 +125,10 @@ class InspectionRecord:
         """
         User-facing/serializable view. Deliberately omits confidence,
         crack counts, bounding boxes, and every other model statistic -
-        only the inspection result and the information needed to display
-        it (status + source + timestamp; image URLs are added by app.py).
+        only the inspection result and the information shown in the
+        inspection details: status + source + timestamp plus the capture
+        location (latitude/longitude, when GPS was available). Image URLs
+        are added by app.py.
         """
         return {
             "id": self.id,
@@ -118,25 +137,10 @@ class InspectionRecord:
             "has_crack": self.has_crack,
             "source": self.source,
             "source_label": self.source_label,
+            "gps_available": bool(self.gps_available),
+            "latitude": self.latitude if self.gps_available else None,
+            "longitude": self.longitude if self.gps_available else None,
         }
-
-    def to_map(self) -> dict:
-        """
-        View for the offline inspection MAP: the operator-safe fields plus
-        the stored aircraft coordinates + geotag quality. Used only by the
-        map/points API, never by the operator result screen.
-        """
-        d = self.to_dict()
-        d.update(
-            latitude=self.latitude,
-            longitude=self.longitude,
-            altitude_m=self.altitude_m,
-            gps_available=bool(self.gps_available),
-            gps_time_delta_ms=self.gps_time_delta_ms,
-            gps_source=self.gps_source,
-            captured_at=self.captured_at,
-        )
-        return d
 
 
 class InspectionDB:
@@ -155,6 +159,10 @@ class InspectionDB:
         with self._conn:
             self._conn.execute(SCHEMA)
         self._migrate()
+        # Enforce one-capture-one-inspection at the DB level (after migrate so
+        # the capture_id column exists on upgraded databases too).
+        with self._conn:
+            self._conn.execute(CAPTURE_ID_INDEX)
 
     def _migrate(self) -> None:
         with self._lock:
@@ -194,7 +202,15 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         captured_at: Optional[str] = None,
+        radius_m: Optional[float] = None,
+        capture_id: Optional[str] = None,
     ) -> int:
+        """
+        Insert one inspection and return its id. If ``capture_id`` is given
+        and a row with that capture_id already exists, this raises
+        ``sqlite3.IntegrityError`` (the UNIQUE index) - callers use that to
+        keep "one capture -> one inspection".
+        """
         with self._cursor() as cur:
             cur.execute(
                 """
@@ -202,8 +218,9 @@ class InspectionDB:
                     (timestamp, status, source, original_image_path,
                      highlighted_image_path, num_instances,
                      latitude, longitude, altitude_m, gps_available,
-                     gps_time_delta_ms, gps_source, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gps_time_delta_ms, gps_source, captured_at, radius_m,
+                     capture_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -219,6 +236,8 @@ class InspectionDB:
                     gps_time_delta_ms,
                     gps_source,
                     captured_at,
+                    radius_m,
+                    capture_id,
                 ),
             )
             return cur.lastrowid
@@ -226,6 +245,15 @@ class InspectionDB:
     def get_inspection(self, inspection_id: int) -> Optional[InspectionRecord]:
         with self._cursor() as cur:
             cur.execute("SELECT * FROM inspections WHERE id = ?", (inspection_id,))
+            row = cur.fetchone()
+        return _row_to_record(row) if row else None
+
+    def get_by_capture_id(self, capture_id: str) -> Optional[InspectionRecord]:
+        """The inspection for a given capture_id, or None. Used for dedup."""
+        if not capture_id:
+            return None
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM inspections WHERE capture_id = ?", (capture_id,))
             row = cur.fetchone()
         return _row_to_record(row) if row else None
 
@@ -253,22 +281,24 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         gps_available: bool = True,
+        radius_m: Optional[float] = None,
     ) -> bool:
         """
-        Backfill / update an inspection's aircraft location (e.g. once an SRT
-        telemetry file appears after capture - Mode B). Returns True if a row
-        was updated.
+        Backfill / update an inspection's location (e.g. once telemetry
+        appears after capture). Returns True if a row was updated. When
+        `radius_m` is given, the inspection-area radius is set too.
         """
         with self._cursor() as cur:
             cur.execute(
                 """
                 UPDATE inspections
                    SET latitude = ?, longitude = ?, gps_available = ?,
-                       gps_time_delta_ms = ?, gps_source = ?
+                       gps_time_delta_ms = ?, gps_source = ?,
+                       radius_m = COALESCE(?, radius_m)
                  WHERE id = ?
                 """,
                 (latitude, longitude, 1 if gps_available else 0,
-                 gps_time_delta_ms, gps_source, inspection_id),
+                 gps_time_delta_ms, gps_source, radius_m, inspection_id),
             )
             return cur.rowcount > 0
 
@@ -284,6 +314,7 @@ class InspectionDB:
                 SELECT * FROM inspections
                  WHERE (gps_available = 0 OR gps_available IS NULL)
                    AND captured_at IS NOT NULL AND captured_at != ''
+                   AND source = 'import'
                  ORDER BY id DESC LIMIT ?
                 """,
                 (limit,),
@@ -296,6 +327,25 @@ class InspectionDB:
             cur.execute("SELECT COUNT(*) AS c FROM inspections")
             row = cur.fetchone()
         return int(row["c"]) if row else 0
+
+    def counts(self) -> dict:
+        """
+        Dashboard summary straight from the DB:
+            {"total": N, "cracks": C, "clear": N - C}
+        `cracks` counts rows whose status is CRACK DETECTED; `clear` is
+        everything else. No model/debug metrics are involved.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS cracks "
+                "FROM inspections",
+                (STATUS_CRACK,),
+            )
+            row = cur.fetchone()
+        total = int(row["total"]) if row and row["total"] is not None else 0
+        cracks = int(row["cracks"]) if row and row["cracks"] is not None else 0
+        return {"total": total, "cracks": cracks, "clear": total - cracks}
 
     def delete_inspection(self, inspection_id: int) -> bool:
         with self._cursor() as cur:
@@ -324,4 +374,6 @@ def _row_to_record(row: sqlite3.Row) -> InspectionRecord:
         gps_time_delta_ms=row["gps_time_delta_ms"] if "gps_time_delta_ms" in keys else None,
         gps_source=row["gps_source"] if "gps_source" in keys else None,
         captured_at=row["captured_at"] if "captured_at" in keys else None,
+        radius_m=row["radius_m"] if "radius_m" in keys else None,
+        capture_id=row["capture_id"] if "capture_id" in keys else None,
     )

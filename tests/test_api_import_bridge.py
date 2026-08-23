@@ -57,8 +57,9 @@ def test_import_raw_bytes_is_analyzed_as_dji_import(client):
     assert j["source"] == "import"
     assert j["source_label"] == "DJI import"
     assert j["duplicate"] is False
-    # Never leak prohibited fields via the automatic path either.
-    for banned in ("confidence", "num_instances", "fps", "latitude"):
+    # Never leak prohibited model metrics via the automatic path either
+    # (latitude/longitude are allowed - they appear in the inspection details).
+    for banned in ("confidence", "num_instances", "fps"):
         assert banned not in j
 
 

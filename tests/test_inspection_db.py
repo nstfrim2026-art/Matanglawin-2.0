@@ -48,7 +48,10 @@ def test_to_dict_only_exposes_allowed_fields(tmp_path):
         original_image_path="/o.jpg", highlighted_image_path="/h.jpg", num_instances=0,
     )
     d = db.get_inspection(iid).to_dict()
-    assert set(d.keys()) == {"id", "timestamp", "status", "has_crack", "source", "source_label"}
+    assert set(d.keys()) == {
+        "id", "timestamp", "status", "has_crack", "source", "source_label",
+        "gps_available", "latitude", "longitude",
+    }
     assert d["status"] in (STATUS_CRACK, STATUS_NO_CRACK)
 
 

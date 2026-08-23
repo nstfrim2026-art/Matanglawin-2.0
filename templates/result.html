@@ -6,22 +6,47 @@
       {{ status }}
     </div>
 
-    <dl class="meta-list meta-inline">
-      <div><dt>Captured</dt><dd>{{ timestamp }}</dd></div>
-      <div><dt>Source</dt><dd>{{ source_label }}</dd></div>
+    <dl class="readout">
+      <div>
+        <dt>Status</dt>
+        <dd class="{{ 'val-crack' if has_crack else 'val-ok' }}">{{ status }}</dd>
+      </div>
+      <div>
+        <dt>Latitude</dt>
+        <dd>
+          {% if gps_available and latitude is not none %}
+            {{ "%.6f"|format(latitude|abs) }}&deg; {{ 'N' if latitude >= 0 else 'S' }}
+          {% else %}
+            Not recorded
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Longitude</dt>
+        <dd>
+          {% if gps_available and longitude is not none %}
+            {{ "%.6f"|format(longitude|abs) }}&deg; {{ 'E' if longitude >= 0 else 'W' }}
+          {% else %}
+            Not recorded
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Date / Time</dt>
+        <dd>{{ (timestamp[:16]).replace('T', ' ') if timestamp else '&mdash;' }}</dd>
+      </div>
+      <div>
+        <dt>Source</dt>
+        <dd>{{ source_label }}</dd>
+      </div>
     </dl>
 
-    <div class="result-images {{ 'single' if not has_crack else '' }}">
+    <div class="result-images single">
       <figure class="shot">
-        <figcaption>Original photo</figcaption>
-        <img src="{{ original_url }}" alt="Original photo" class="shot-img">
+        <figcaption>{{ 'Analyzed photo (crack highlighted)' if has_crack else 'Analyzed photo' }}</figcaption>
+        <img src="{{ highlighted_url if has_crack else original_url }}"
+             alt="Analyzed inspection photo" class="shot-img">
       </figure>
-      {% if has_crack %}
-      <figure class="shot">
-        <figcaption>Red-highlighted</figcaption>
-        <img src="{{ highlighted_url }}" alt="Crack highlighted photo" class="shot-img">
-      </figure>
-      {% endif %}
     </div>
 
     <div class="actions">
@@ -29,4 +54,53 @@
       <a href="{{ url_for('inspections_page') }}" class="btn-primary">View inspection history</a>
     </div>
   </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // When the analyzed photo has a crack, give clear multi-sensory feedback:
+  // a pulsing red status banner + a short offline WebAudio alert tone (no
+  // audio file). Audio may need a first user gesture on some browsers, so we
+  // try on load and again on the first interaction. The visual alarm always
+  // shows regardless of whether audio is permitted.
+  var HAS_CRACK = {{ 'true' if has_crack else 'false' }};
+  (function () {
+    if (!HAS_CRACK) return;
+    var banner = document.querySelector('.status-banner');
+    if (banner) banner.classList.add('status-alarm');
+
+    var ctx = null, played = false;
+    function schedule() {
+      [0, 0.30].forEach(function (off) {           // two short beeps
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'square';
+        o.frequency.value = 880;
+        o.connect(g); g.connect(ctx.destination);
+        var t = ctx.currentTime + off;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+        o.start(t); o.stop(t + 0.24);
+      });
+    }
+    function detach() {
+      ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(function (ev) {
+        document.removeEventListener(ev, tryPlay);
+      });
+    }
+    function tryPlay() {
+      if (played) return;
+      try {
+        ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+        var go = function () { if (!played) { played = true; schedule(); detach(); } };
+        if (ctx.state === 'suspended') { ctx.resume().then(go).catch(function () {}); }
+        else { go(); }
+      } catch (e) { /* audio unavailable - visual alarm still shows */ }
+    }
+    tryPlay();
+    ['pointerdown', 'keydown', 'touchstart', 'click'].forEach(function (ev) {
+      document.addEventListener(ev, tryPlay);
+    });
+  })();
+</script>
 {% endblock %}

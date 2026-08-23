@@ -242,10 +242,11 @@ _lock_obj = None
 # Cheap to construct, so it is a plain module-level singleton.
 bridge_status = BridgeStatus()
 
-# Latest aircraft telemetry (offline DJI GPS geotagging). Samples arrive at
-# POST /api/telemetry AND from the SRT watcher; captures are stamped with the
-# nearest sample in time.
-telemetry_store = TelemetryStore()
+# Latest GPS position (offline geotagging). Samples arrive at POST
+# /api/telemetry (the phone GPS collector, e.g. Colota) and captures are
+# stamped with the sample nearest in time. The latest sample is persisted
+# locally so it survives a restart.
+telemetry_store = TelemetryStore(persist_path=str(DATA_DIR / "telemetry_latest.json"))
 _srt_watcher: SrtWatcher = None
 
 
@@ -271,9 +272,11 @@ def get_service() -> InspectionService:
     if _service is None:
         with _get_lock():
             if _service is None:
+                import telemetry_store as _ts
                 _service = InspectionService(
                     get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS,
-                    telemetry_store=telemetry_store, **detector_config()
+                    telemetry_store=telemetry_store,
+                    radius_m=_ts.phone_gps_radius_m(), **detector_config()
                 )
     return _service
 
@@ -391,18 +394,15 @@ def inspection_result(inspection_id):
         original_url=urls["original"],
         highlighted_url=urls["highlighted"],
         inspection_id=record.id,
+        latitude=record.latitude,
+        longitude=record.longitude,
+        gps_available=record.gps_available,
     )
 
 
 @app.route("/inspections", methods=["GET"])
 def inspections_page():
     return render_template("inspections.html")
-
-
-@app.route("/map", methods=["GET"])
-def map_page():
-    """Offline inspection map (locally vendored Leaflet, no cloud provider)."""
-    return render_template("map.html")
 
 
 @app.route("/health", methods=["GET"])
@@ -496,7 +496,13 @@ def api_import():
     try:
         tmp_path.write_bytes(data)
         log.info("[MATANGLAWIN] Inspection started")
-        record = get_service().analyze_file(str(tmp_path), source="import", captured_at=captured_at)
+        # The content hash is this capture's unique identity. Passing it as
+        # capture_id makes "one capture -> one inspection" hold at the DB
+        # level, and it is the SAME key the watch-folder transport uses, so
+        # the same photo arriving by both routes can never create two records.
+        record = get_service().analyze_file(
+            str(tmp_path), source="import", captured_at=captured_at, capture_id=digest
+        )
     except InvalidImageError:
         log.warning("[PHOTO BRIDGE] Rejected: not a readable image: %s", filename or digest[:12])
         return jsonify({"error": "invalid or corrupt image"}), 400
@@ -568,37 +574,95 @@ def api_inspections():
     return jsonify({"count": db.count(), "inspections": items})
 
 
+@app.route("/api/inspections/summary", methods=["GET"])
+def api_inspections_summary():
+    """
+    Dashboard summary counters from the actual database:
+        {"total": N, "cracks": C, "clear": N - C}
+    Updates automatically as new inspections are created (the dashboard
+    polls this). No model/debug metrics are exposed.
+    """
+    return jsonify(get_db().counts())
+
+
 # ===========================================================================
 # Aircraft telemetry (offline DJI GPS geotagging)
 # ===========================================================================
-@app.route("/api/telemetry", methods=["POST"])
+def _extract_gps(fields) -> tuple:
+    """
+    Pull (lat, lon, timestamp) out of a phone-GPS payload, ignoring every
+    other field. Accepts the real Colota Google Play payload
+    (lat, lon, acc, alt, vel, batt, bs, tst, bear, ...) as well as plain
+    lat/lon/timestamp. `fields` is a mapping (JSON object or request.args).
+    Colota uses `tst` for the timestamp; only lat/lon/timestamp are used.
+    """
+    def _get(*names):
+        for n in names:
+            if n in fields and fields.get(n) not in (None, ""):
+                return fields.get(n)
+        return None
+
+    lat = _get("lat", "latitude")
+    lon = _get("lon", "longitude")
+    ts = _get("tst", "timestamp", "time", "ts")
+    return lat, lon, ts
+
+
+@app.route("/api/telemetry", methods=["POST", "GET"])
 def api_telemetry():
     """
-    Ingest one aircraft GPS sample from the local collector (LAN only).
-    Body JSON: {latitude, longitude, altitude_m?, timestamp?, source?}.
-    The latest valid sample is retained in memory for capture association.
-    Invalid samples are rejected with 400 but never crash the server.
+    Ingest one phone-GPS sample from the local collector (LAN only, e.g.
+    Colota on the operator's phone). Accepts:
+
+      * POST JSON object  - the full Colota payload
+        {lat, lon, acc, alt, vel, batt, bs, tst, bear, ...};
+      * POST JSON array   - a batch of such objects (the latest is used);
+      * GET query params  - ?lat=..&lon=..&tst=.. .
+
+    Only latitude/longitude/timestamp are extracted and stored - all other
+    Colota fields (acc/alt/vel/batt/bs/bear) are ignored, never stored or
+    exposed. Colota's `tst` maps to the timestamp; a missing/invalid
+    timestamp is NOT an error (the arrival time is used). HTTP 400 is
+    returned ONLY when the required location (lat/lon) is missing or invalid.
+    Never crashes on bad input.
     """
-    data = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if isinstance(payload, list):                 # batch -> use the newest entry
+        payload = payload[-1] if payload else {}
+    if not isinstance(payload, dict) or not payload:
+        payload = request.args                     # fall back to GET query params
+
+    lat, lon, ts = _extract_gps(payload)
     sample = telemetry_store.add(
-        latitude=data.get("latitude"),
-        longitude=data.get("longitude"),
-        altitude_m=data.get("altitude_m"),
-        timestamp=data.get("timestamp"),
-        source=data.get("source", "dji_flight_record"),
+        latitude=lat, longitude=lon, timestamp=ts, source="phone_gps",
     )
     if sample is None:
-        return jsonify({"ok": False, "error": "invalid telemetry sample"}), 400
+        # Only genuinely invalid/missing LOCATION is a 400.
+        return jsonify({"ok": False, "error": "missing or invalid lat/lon"}), 400
+
+    ts_s = int(round(sample.timestamp_ms / 1000.0))
+    log.info("[GPS] received lat=%s lon=%s timestamp=%s",
+             sample.latitude, sample.longitude, ts_s)
     return jsonify({"ok": True, "buffered": telemetry_store.stats()["buffered"]})
 
 
 @app.route("/api/telemetry/latest", methods=["GET"])
 def api_telemetry_latest():
-    """Latest aircraft position + staleness (for internal/debug views)."""
+    """
+    Latest GPS position (debug/verification). Returns the simple
+    {lat, lon, timestamp} view Colota testing expects, plus the
+    availability/staleness fields. Never exposes
+    accuracy/altitude/speed/battery/heading.
+    """
     latest, stale = telemetry_store.latest()
     stats = telemetry_store.stats()
     srt_mode = _srt_watcher.mode if _srt_watcher is not None else "idle"
     return jsonify({
+        # simple debug view (Colota verification)
+        "lat": latest.latitude if latest else None,
+        "lon": latest.longitude if latest else None,
+        "timestamp": int(round(latest.timestamp_ms / 1000.0)) if latest else None,
+        # map/internal view
         "available": latest is not None,
         "stale": stale,
         "latest": latest.to_dict() if latest else None,
@@ -607,25 +671,6 @@ def api_telemetry_latest():
         "rejected": stats["rejected"],
         "srt_mode": srt_mode,
     })
-
-
-@app.route("/api/inspections/geo", methods=["GET"])
-def api_inspections_geo():
-    """
-    Points for the offline map: geolocated inspections only. Coordinates
-    live here (map view), not in the operator result screen. Returns a
-    compact point list plus image URLs for marker popups.
-    """
-    db = get_db()
-    records = db.list_inspections(limit=1000)
-    points = []
-    for r in records:
-        if r.latitude is None or r.longitude is None or not r.gps_available:
-            continue
-        m = r.to_map()
-        m["urls"] = _inspection_urls(r)
-        points.append(m)
-    return jsonify({"count": len(points), "points": points})
 
 
 def _send_record_image(inspection_id, which):
