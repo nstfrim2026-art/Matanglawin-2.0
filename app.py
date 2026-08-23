@@ -574,48 +574,81 @@ def api_inspections():
 # ===========================================================================
 # Aircraft telemetry (offline DJI GPS geotagging)
 # ===========================================================================
-@app.route("/api/telemetry", methods=["POST"])
+def _extract_gps(fields) -> tuple:
+    """
+    Pull (lat, lon, timestamp) out of a phone-GPS payload, ignoring every
+    other field. Accepts the real Colota Google Play payload
+    (lat, lon, acc, alt, vel, batt, bs, tst, bear, ...) as well as plain
+    lat/lon/timestamp. `fields` is a mapping (JSON object or request.args).
+    Colota uses `tst` for the timestamp; only lat/lon/timestamp are used.
+    """
+    def _get(*names):
+        for n in names:
+            if n in fields and fields.get(n) not in (None, ""):
+                return fields.get(n)
+        return None
+
+    lat = _get("lat", "latitude")
+    lon = _get("lon", "longitude")
+    ts = _get("tst", "timestamp", "time", "ts")
+    return lat, lon, ts
+
+
+@app.route("/api/telemetry", methods=["POST", "GET"])
 def api_telemetry():
     """
-    Ingest one GPS sample from the phone GPS collector (LAN only, e.g.
-    Colota). Body JSON: {lat, lon, timestamp} (also accepts latitude/
-    longitude for compatibility). latitude/longitude must be in range and a
-    valid timestamp must be present. Invalid samples are rejected with 400
-    but never crash the server. The latest valid sample is retained (and
-    persisted) for capture association.
+    Ingest one phone-GPS sample from the local collector (LAN only, e.g.
+    Colota on the operator's phone). Accepts:
+
+      * POST JSON object  - the full Colota payload
+        {lat, lon, acc, alt, vel, batt, bs, tst, bear, ...};
+      * POST JSON array   - a batch of such objects (the latest is used);
+      * GET query params  - ?lat=..&lon=..&tst=.. .
+
+    Only latitude/longitude/timestamp are extracted and stored - all other
+    Colota fields (acc/alt/vel/batt/bs/bear) are ignored, never stored or
+    exposed. Colota's `tst` maps to the timestamp; a missing/invalid
+    timestamp is NOT an error (the arrival time is used). HTTP 400 is
+    returned ONLY when the required location (lat/lon) is missing or invalid.
+    Never crashes on bad input.
     """
-    data = request.get_json(silent=True) or {}
-    lat = data.get("lat", data.get("latitude"))
-    lon = data.get("lon", data.get("longitude"))
-    ts = data.get("timestamp")
+    payload = request.get_json(silent=True)
+    if isinstance(payload, list):                 # batch -> use the newest entry
+        payload = payload[-1] if payload else {}
+    if not isinstance(payload, dict) or not payload:
+        payload = request.args                     # fall back to GET query params
 
-    # Validate before storing: coords in range + a parseable timestamp.
-    try:
-        latf, lonf = float(lat), float(lon)
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "invalid lat/lon"}), 400
-    if not (-90.0 <= latf <= 90.0) or not (-180.0 <= lonf <= 180.0):
-        return jsonify({"ok": False, "error": "lat/lon out of range"}), 400
-    from telemetry_store import parse_timestamp_ms as _parse_ts
-    if _parse_ts(ts) is None:
-        return jsonify({"ok": False, "error": "missing or invalid timestamp"}), 400
-
+    lat, lon, ts = _extract_gps(payload)
     sample = telemetry_store.add(
-        latitude=latf, longitude=lonf, timestamp=ts,
-        source=data.get("source", "phone_gps"),
+        latitude=lat, longitude=lon, timestamp=ts, source="phone_gps",
     )
     if sample is None:
-        return jsonify({"ok": False, "error": "invalid telemetry sample"}), 400
+        # Only genuinely invalid/missing LOCATION is a 400.
+        return jsonify({"ok": False, "error": "missing or invalid lat/lon"}), 400
+
+    ts_s = int(round(sample.timestamp_ms / 1000.0))
+    log.info("[GPS] received lat=%s lon=%s timestamp=%s",
+             sample.latitude, sample.longitude, ts_s)
     return jsonify({"ok": True, "buffered": telemetry_store.stats()["buffered"]})
 
 
 @app.route("/api/telemetry/latest", methods=["GET"])
 def api_telemetry_latest():
-    """Latest aircraft position + staleness (for internal/debug views)."""
+    """
+    Latest GPS position (debug/verification). Returns the simple
+    {lat, lon, timestamp} view Colota testing expects, plus the
+    availability/staleness fields the offline map uses. Never exposes
+    accuracy/altitude/speed/battery/heading.
+    """
     latest, stale = telemetry_store.latest()
     stats = telemetry_store.stats()
     srt_mode = _srt_watcher.mode if _srt_watcher is not None else "idle"
     return jsonify({
+        # simple debug view (Colota verification)
+        "lat": latest.latitude if latest else None,
+        "lon": latest.longitude if latest else None,
+        "timestamp": int(round(latest.timestamp_ms / 1000.0)) if latest else None,
+        # map/internal view
         "available": latest is not None,
         "stale": stale,
         "latest": latest.to_dict() if latest else None,

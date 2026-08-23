@@ -46,24 +46,52 @@ def client(tmp_path, monkeypatch):
 
 # -- Colota {lat, lon, timestamp} ingest + validation ----------------
 
+def test_telemetry_accepts_full_colota_payload(client):
+    # The exact real Colota Google Play payload (tst + extra fields).
+    r = client.post("/api/telemetry", json={
+        "lat": 7.123456, "lon": 125.654321, "acc": 8, "alt": 42, "vel": 0,
+        "batt": 85, "bs": 1, "tst": 1704067200, "bear": 180,
+    })
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    latest = client.get("/api/telemetry/latest").get_json()
+    # simple debug view returns ONLY lat/lon/timestamp
+    assert abs(latest["lat"] - 7.123456) < 1e-6
+    assert abs(latest["lon"] - 125.654321) < 1e-6
+    assert latest["timestamp"] == 1704067200
+    # extras are NOT stored/exposed
+    assert "acc" not in latest and "accuracy" not in latest and "battery" not in latest
+    assert "bear" not in latest and "vel" not in latest
+    assert latest["latest"]["altitude_m"] is None   # alt=42 ignored
+
+
 def test_telemetry_accepts_colota_lat_lon(client):
-    r = client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321, "timestamp": 1704067200})
+    r = client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321, "tst": 1704067200})
     assert r.status_code == 200 and r.get_json()["ok"] is True
     latest = client.get("/api/telemetry/latest").get_json()
     assert latest["available"] is True
     assert abs(latest["latest"]["latitude"] - 7.123456) < 1e-6
 
 
-def test_telemetry_rejects_missing_timestamp(client):
+def test_telemetry_accepts_get_query_params(client):
+    r = client.get("/api/telemetry?lat=7.10&lon=125.10&tst=1704067200")
+    assert r.status_code == 200 and r.get_json()["ok"] is True
+    assert abs(client.get("/api/telemetry/latest").get_json()["lat"] - 7.10) < 1e-6
+
+
+def test_telemetry_missing_timestamp_is_accepted_using_now(client):
+    # Colota always sends tst, but a missing timestamp must NOT be a 400 -
+    # only missing/invalid LOCATION is rejected. Arrival time is used.
     r = client.post("/api/telemetry", json={"lat": 7.1, "lon": 125.6})
-    assert r.status_code == 400
-    assert client.get("/api/telemetry/latest").get_json()["available"] is False
+    assert r.status_code == 200
+    assert client.get("/api/telemetry/latest").get_json()["available"] is True
 
 
 def test_telemetry_rejects_out_of_range(client):
-    assert client.post("/api/telemetry", json={"lat": 999, "lon": 0, "timestamp": 1704067200}).status_code == 400
-    assert client.post("/api/telemetry", json={"lat": 0, "lon": 500, "timestamp": 1704067200}).status_code == 400
-    assert client.post("/api/telemetry", json={"lat": "x", "lon": "y", "timestamp": 1}).status_code == 400
+    assert client.post("/api/telemetry", json={"lat": 999, "lon": 0, "tst": 1704067200}).status_code == 400
+    assert client.post("/api/telemetry", json={"lat": 0, "lon": 500, "tst": 1704067200}).status_code == 400
+    assert client.post("/api/telemetry", json={"lat": "x", "lon": "y", "tst": 1}).status_code == 400
+    # (0,0) null-island is treated as no fix
+    assert client.post("/api/telemetry", json={"lat": 0, "lon": 0, "tst": 1704067200}).status_code == 400
 
 
 # -- configurable radius on capture ---------------------------------
