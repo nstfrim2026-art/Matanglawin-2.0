@@ -9,6 +9,16 @@
     <dl class="meta-list meta-inline">
       <div><dt>Captured</dt><dd>{{ timestamp }}</dd></div>
       <div><dt>Source</dt><dd>{{ source_label }}</dd></div>
+      <div>
+        <dt>GPS location</dt>
+        <dd>
+          {% if gps_available and latitude is not none and longitude is not none %}
+            {{ "%.6f"|format(latitude) }}, {{ "%.6f"|format(longitude) }}
+          {% else %}
+            Not recorded
+          {% endif %}
+        </dd>
+      </div>
     </dl>
 
     <div class="result-images {{ 'single' if not has_crack else '' }}">

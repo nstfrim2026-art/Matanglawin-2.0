@@ -82,6 +82,8 @@ def test_no_crack_only_or_confidence_leaks_in_backend():
         original_image_path="o", highlighted_image_path="h", num_instances=3,
     )
     d = rec.to_dict()
+    # latitude/longitude ARE now intentionally exposed (shown in the
+    # inspection details); only model metrics remain prohibited.
     for banned in ("confidence", "num_instances", "crack_image_paths",
-                   "crack_image_names", "latitude", "longitude", "detection_info", "fps"):
+                   "crack_image_names", "detection_info", "fps"):
         assert banned not in d, f"to_dict() leaks prohibited field: {banned}"

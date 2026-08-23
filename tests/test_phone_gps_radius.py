@@ -96,33 +96,37 @@ def test_telemetry_rejects_out_of_range(client):
 
 # -- configurable radius on capture ---------------------------------
 
-def test_capture_stores_configured_radius(client, monkeypatch):
+def test_capture_with_gps_surfaces_coords_and_stores_radius(client, monkeypatch):
+    import app as appmod
     monkeypatch.setenv("PHONE_GPS_RADIUS_METERS", "100")
-    monkeypatch.setattr(__import__("app"), "_service", None)  # rebuild service with new radius
+    monkeypatch.setattr(appmod, "_service", None)  # rebuild service with new radius
     stubs.stub_one_crack(inference_core)
     client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321, "timestamp": _TS})
     j = client.post("/api/inspect", data={
         "image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg"), "captured_at": _TS,
     }, content_type="multipart/form-data").get_json()
     assert j["status"] == "CRACK DETECTED"
-    # radius is NOT exposed in the operator result payload
-    assert "radius_m" not in j
-    geo = client.get("/api/inspections/geo").get_json()
-    assert geo["count"] == 1
-    pt = geo["points"][0]
-    assert pt["radius_m"] == 100
-    assert pt["gps_available"] is True
-    # no prohibited fields leak onto the map either
-    assert "accuracy" not in pt and "altitude_m" in pt  # altitude present but null/unused
-    assert pt["altitude_m"] is None
+    # capture coordinates are surfaced in the inspection details
+    assert j["gps_available"] is True
+    assert abs(j["latitude"] - 7.123456) < 1e-6 and abs(j["longitude"] - 125.654321) < 1e-6
+    # radius is stored on the record (no longer displayed, but kept as metadata)
+    # while accuracy/altitude are never stored/exposed
+    assert "radius_m" not in j and "accuracy" not in j and "altitude_m" not in j
+    rec = appmod.get_db().get_inspection(j["id"])
+    assert rec.radius_m == 100
+    assert rec.altitude_m is None
 
 
-def test_capture_without_gps_has_no_radius_and_no_marker(client):
+def test_capture_without_gps_has_no_coords_and_no_radius(client):
+    import app as appmod
     stubs.stub_no_crack(inference_core)
     j = client.post("/api/inspect", data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
                     content_type="multipart/form-data").get_json()
     assert j["status"] == "NO CRACK DETECTED"       # analysis still runs
-    assert client.get("/api/inspections/geo").get_json()["count"] == 0
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
+    rec = appmod.get_db().get_inspection(j["id"])
+    assert rec.radius_m is None
 
 
 # -- dashboard cleanup + crack alert --------------------------------
@@ -139,12 +143,6 @@ def test_dashboard_js_has_beep_and_alert():
     js = (Path(__file__).resolve().parent.parent / "static" / "dashboard.js").read_text()
     assert "AudioContext" in js and "function beep" in js
     assert "showCrackAlert" in js
-
-
-def test_map_has_radius_circle(client):
-    body = client.get("/map").data.decode()
-    assert "L.circle" in body
-    assert "Inspection Radius" in body
 
 
 # -- radius config + persistence (unit) -----------------------------

@@ -19,11 +19,10 @@ Columns (exactly the inspection-history fields the spec calls for):
     gps_available / gps_time_delta_ms / gps_source / captured_at
                   - geotag quality metadata (nullable)
 
-``to_dict()`` returns only what the OPERATOR UI is allowed to show
-(status/source/timestamp) and still omits confidence, counts, and
-coordinates. The offline map uses ``to_map()`` instead, which adds the
-stored latitude/longitude so inspections can be placed as markers - the
-coordinates never leak into the operator's result screen.
+``to_dict()`` returns what the OPERATOR UI is allowed to show
+(status/source/timestamp plus the capture latitude/longitude, which are
+displayed in the inspection details) and still omits confidence, crack
+counts, and every other model statistic.
 
 This module has no Flask/YOLO dependency; it only needs the standard
 library (sqlite3), so it's trivial to unit test in isolation. A tiny
@@ -111,8 +110,10 @@ class InspectionRecord:
         """
         User-facing/serializable view. Deliberately omits confidence,
         crack counts, bounding boxes, and every other model statistic -
-        only the inspection result and the information needed to display
-        it (status + source + timestamp; image URLs are added by app.py).
+        only the inspection result and the information shown in the
+        inspection details: status + source + timestamp plus the capture
+        location (latitude/longitude, when GPS was available). Image URLs
+        are added by app.py.
         """
         return {
             "id": self.id,
@@ -121,26 +122,10 @@ class InspectionRecord:
             "has_crack": self.has_crack,
             "source": self.source,
             "source_label": self.source_label,
+            "gps_available": bool(self.gps_available),
+            "latitude": self.latitude if self.gps_available else None,
+            "longitude": self.longitude if self.gps_available else None,
         }
-
-    def to_map(self) -> dict:
-        """
-        View for the offline inspection MAP: the operator-safe fields plus
-        the stored aircraft coordinates + geotag quality. Used only by the
-        map/points API, never by the operator result screen.
-        """
-        d = self.to_dict()
-        d.update(
-            latitude=self.latitude,
-            longitude=self.longitude,
-            altitude_m=self.altitude_m,
-            gps_available=bool(self.gps_available),
-            gps_time_delta_ms=self.gps_time_delta_ms,
-            gps_source=self.gps_source,
-            captured_at=self.captured_at,
-            radius_m=self.radius_m,
-        )
-        return d
 
 
 class InspectionDB:

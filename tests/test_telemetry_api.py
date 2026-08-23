@@ -1,8 +1,9 @@
 """
-Tests for the telemetry + map endpoints in app.py: /api/telemetry ingest,
+Tests for the telemetry endpoints in app.py: /api/telemetry ingest,
 /api/telemetry/latest, capture->nearest-GPS association into an inspection,
-/api/inspections/geo marker generation, missing-GPS behavior, and that the
-operator result view still hides coordinates. Segmentation is stubbed.
+missing-GPS behavior, and that the capture coordinates are now surfaced in
+the inspection details (payload + result page). The map has been removed.
+Segmentation is stubbed.
 """
 
 import io
@@ -79,26 +80,27 @@ def test_capture_is_geotagged_with_nearest_sample(client):
         "captured_at": _TS,
     }, content_type="multipart/form-data").get_json()
     assert j["status"] == "CRACK DETECTED"
-    # operator result view must NOT expose coordinates
-    assert "latitude" not in j and "longitude" not in j
+    # capture coordinates are now surfaced in the inspection details payload
+    assert j["gps_available"] is True
+    assert abs(j["latitude"] - 7.123456) < 1e-6
+    assert abs(j["longitude"] - 125.654321) < 1e-6
 
-    geo = client.get("/api/inspections/geo").get_json()
-    assert geo["count"] == 1
-    pt = geo["points"][0]
-    assert pt["id"] == j["id"]
-    assert abs(pt["latitude"] - 7.123456) < 1e-6
-    assert pt["gps_available"] is True
-    assert pt["gps_time_delta_ms"] is not None
-    assert pt["has_crack"] is True
-    assert "highlighted" in pt["urls"]
+    # ...and rendered on the inspection result page ("the description itself").
+    body = client.get(f"/inspection/{j['id']}").data.decode()
+    assert "GPS location" in body
+    assert "7.123456, 125.654321" in body
 
 
-def test_capture_without_gps_still_works_and_has_no_marker(client):
+def test_capture_without_gps_still_works_and_has_no_coords(client):
     stubs.stub_no_crack(inference_core)
     j = client.post("/api/inspect", data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
                     content_type="multipart/form-data").get_json()
     assert j["status"] == "NO CRACK DETECTED"       # analysis NOT blocked by missing GPS
-    assert client.get("/api/inspections/geo").get_json()["count"] == 0
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
+    # the result page shows a graceful placeholder, never a blank/broken value
+    body = client.get(f"/inspection/{j['id']}").data.decode()
+    assert "GPS location" in body and "Not recorded" in body
 
 
 def test_stale_far_sample_not_attached(client):
@@ -106,18 +108,17 @@ def test_stale_far_sample_not_attached(client):
     # telemetry far in the past relative to capture (default match window 2 s)
     client.post("/api/telemetry", json={
         "latitude": 7.1, "longitude": 125.6, "timestamp": "2020-01-01T00:00:00Z"})
-    client.post("/api/inspect", data={
+    j = client.post("/api/inspect", data={
         "image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg"), "captured_at": _TS,
-    }, content_type="multipart/form-data")
-    assert client.get("/api/inspections/geo").get_json()["count"] == 0
+    }, content_type="multipart/form-data").get_json()
+    assert j["gps_available"] is False
+    assert j["latitude"] is None and j["longitude"] is None
 
 
-# -- map page --------------------------------------------------------
+# -- map removed -----------------------------------------------------
 
-def test_map_page_renders(client):
-    resp = client.get("/map")
-    assert resp.status_code == 200
-    body = resp.data.decode()
-    assert "Inspection Map" in body
-    assert "leaflet" in body.lower()
-    assert "/api/inspections/geo" in body
+def test_map_routes_are_gone(client):
+    # The map feature (page, tiles, geo API) was removed entirely.
+    assert client.get("/map").status_code == 404
+    assert client.get("/api/inspections/geo").status_code == 404
+    assert client.get("/maps/5/10/12.png").status_code == 404

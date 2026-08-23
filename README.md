@@ -440,7 +440,7 @@ telemetry source (CSV/GPS)         PC (MatanglaWIN)
    CAPTURE ─▶ analyze ─▶ inspection  ◀── nearest GPS to capture time
                                     (gps_available, gps_time_delta_ms)
                                                           │
-                                              /map  (offline Leaflet markers)
+                             latitude/longitude shown in the inspection details
 ```
 
 - `telemetry_store.py` — validated, time-buffered samples; **nearest-sample
@@ -451,12 +451,11 @@ telemetry source (CSV/GPS)         PC (MatanglaWIN)
   telemetry folder and POSTs the latest sample to the PC (address configurable
   via `--server` / `MATANGLAWIN_TELEMETRY_SERVER`; **never hardcoded**).
 - `POST /api/telemetry` / `GET /api/telemetry/latest` — ingest + latest fix.
-- `/map` + `GET /api/inspections/geo` — offline Leaflet map (vendored under
-  `static/vendor/leaflet/`, no cloud tiles required) with **red = CRACK
-  DETECTED / green = NO CRACK DETECTED** markers and popups (images, result,
-  time, coordinates). Coordinates live on the map view, not the operator
-  result screen. For an offline basemap, point `LOCAL_TILE_URL` in
-  `templates/map.html` at a local tile server.
+- The matched **latitude/longitude** (decimal degrees) are displayed directly
+  in the inspection details — on the dashboard's *Latest Inspection* card and
+  on the full result page (`/inspection/<id>`). There is **no map**: the
+  location is presented as plain coordinate text. When a capture has no GPS
+  match it still analyzes normally and simply shows *Not recorded*.
 
 Delivered mode: **POST-FLIGHT / SOURCE-AGNOSTIC TELEMETRY (offline)** — not
 live FlightRecord telemetry, which is not possible offline for the Neo 2.
@@ -467,43 +466,22 @@ The simplest offline location source is the **phone's GPS**. An Android GPS
 sender (e.g. **Colota**) POSTs `{lat, lon, timestamp}` to `POST /api/telemetry`
 over the LAN; MatanglaWIN keeps the latest valid sample (persisted locally),
 and each capture is stamped with the sample **nearest in time**. The operator
-UI just calls it **Inspection Location / GPS Location** — the marker represents
-the crack's inspection **area** (a configurable radius around the recorded
-point), not exact aircraft coordinates.
+UI just calls it **GPS Location** and shows the matched latitude/longitude as
+plain text in the inspection details — there is no map.
 
 - **Ingest:** `POST /api/telemetry` with `{"lat":.., "lon":.., "timestamp":..}`
   (validated: lat/lon in range + a valid timestamp; malformed rejected).
   Point Colota at `http://<PC-LAN-IP>:5000/api/telemetry` (the PC IP is shown
   by the app's dynamic network config — nothing is hardcoded).
-- **Radius:** `PHONE_GPS_RADIUS_METERS` (default `50`; e.g. 25/50/100/200) —
-  a single source of truth, stored per inspection and drawn as a circle on the
-  map. `accuracy`/`altitude`/`heading`/`speed` are never stored or shown.
-- **Map:** `/map` (offline Leaflet) draws each inspection as a marker + radius
-  circle — **red = CRACK / green = NO CRACK / blue = current phone location**
-  (blue only while fresh). Click a marker for the image, result, time, and
-  radius. If GPS is unavailable a capture still analyzes — it just has no marker.
-
-### Offline map tiles (one-time setup)
-
-The basemap is served **by MatanglaWIN itself** from local files — no
-internet, no OpenStreetMap/Google/Mapbox/Esri at runtime:
-
-```
-Browser → /maps/{z}/{x}/{y}.png → MatanglaWIN → static/maps/{z}/{x}/{y}.png
-```
-
-Drop a real offline tile pack into `static/maps/` in the standard
-`{z}/{x}/{y}.png` layout (or point `MATANGLAWIN_MAP_TILES_DIR` at a folder
-elsewhere — the frontend never changes). Prepare the pack **once** on an
-internet-connected machine for just your inspection area, e.g. with a tile
-downloader/exporter such as **MOBAC** (Mobile Atlas Creator) that outputs a
-plain `{z}/{x}/{y}.png` folder tree, then copy those `z/x/y` folders into
-`static/maps/`. No tiles are bundled or fabricated.
-
-Until a tile pack is installed, the map shows a clean **"Map data
-unavailable"** panel (never a blank/broken map) and **still renders all
-inspection markers + radius circles**, which remain fully clickable. Check
-`GET /api/map/available` to see whether a pack is installed.
+- **Display:** the matched **latitude, longitude** (decimal degrees, 6 dp) are
+  shown on the dashboard's *Latest Inspection* card and on the result page
+  once the photo has been processed. `accuracy`/`altitude`/`heading`/`speed`
+  are never stored or shown.
+- **No GPS:** if no sample matches, the capture still analyzes — its GPS
+  location just reads **Not recorded**.
+- **Radius (metadata):** `PHONE_GPS_RADIUS_METERS` (default `50`) is still
+  stored per inspection as area metadata, but is no longer drawn anywhere
+  (the map was removed).
 - **Crack alert:** when a new inspection detects a crack, the dashboard plays
   one short offline **beep** (WebAudio, no file) and shows a prominent
   auto-hiding **CRACK DETECTED** notice — once per new inspection, never on a

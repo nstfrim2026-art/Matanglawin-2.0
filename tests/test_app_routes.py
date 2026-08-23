@@ -140,9 +140,9 @@ def test_api_inspect_crack_flow_serves_only_two_images(client):
     ).get_json()
 
     assert j["status"] == "CRACK DETECTED"
-    # Never leak prohibited fields.
-    for banned in ("confidence", "num_instances", "crack_image_names",
-                   "latitude", "longitude", "fps"):
+    # Never leak prohibited model metrics (coordinates are allowed - they are
+    # shown in the inspection details).
+    for banned in ("confidence", "num_instances", "crack_image_names", "fps"):
         assert banned not in j
     urls = j["urls"]
     assert set(urls.keys()) == {"original", "highlighted"}  # no 'cracks'

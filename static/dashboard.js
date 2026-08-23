@@ -172,6 +172,13 @@ function renderLatest(rec) {
   setText('latest-timestamp', rec.timestamp);
   setText('latest-source', rec.source_label || (rec.source === 'import' ? 'DJI import' : 'Manual upload'));
 
+  // GPS location of the capture (shown once the photo has been processed).
+  // Only present when an aircraft/phone GPS sample was matched at capture time.
+  const hasGps = rec.gps_available && rec.latitude != null && rec.longitude != null;
+  setText('latest-gps', hasGps
+    ? `${rec.latitude.toFixed(6)}, ${rec.longitude.toFixed(6)}`
+    : 'Not recorded');
+
   const urls = rec.urls || {};
   const original = document.getElementById('latest-original');
   // Cache-bust per inspection id so the browser always shows the new photo.
