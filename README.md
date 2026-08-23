@@ -461,6 +461,37 @@ telemetry source (CSV/GPS)         PC (MatanglaWIN)
 Delivered mode: **POST-FLIGHT / SOURCE-AGNOSTIC TELEMETRY (offline)** — not
 live FlightRecord telemetry, which is not possible offline for the Neo 2.
 
+## Phone GPS (inspection location) + radius + crack alerts
+
+The simplest offline location source is the **phone's GPS**. An Android GPS
+sender (e.g. **Colota**) POSTs `{lat, lon, timestamp}` to `POST /api/telemetry`
+over the LAN; MatanglaWIN keeps the latest valid sample (persisted locally),
+and each capture is stamped with the sample **nearest in time**. The operator
+UI just calls it **Inspection Location / GPS Location** — the marker represents
+the crack's inspection **area** (a configurable radius around the recorded
+point), not exact aircraft coordinates.
+
+- **Ingest:** `POST /api/telemetry` with `{"lat":.., "lon":.., "timestamp":..}`
+  (validated: lat/lon in range + a valid timestamp; malformed rejected).
+  Point Colota at `http://<PC-LAN-IP>:5000/api/telemetry` (the PC IP is shown
+  by the app's dynamic network config — nothing is hardcoded).
+- **Radius:** `PHONE_GPS_RADIUS_METERS` (default `50`; e.g. 25/50/100/200) —
+  a single source of truth, stored per inspection and drawn as a circle on the
+  map. `accuracy`/`altitude`/`heading`/`speed` are never stored or shown.
+- **Map:** `/map` (offline Leaflet) draws each inspection as a marker + radius
+  circle — **red = CRACK / green = NO CRACK / blue = current phone location**
+  (blue only while fresh). Click a marker for the image, result, time, and
+  radius. If GPS is unavailable a capture still analyzes — it just has no marker.
+- **Crack alert:** when a new inspection detects a crack, the dashboard plays
+  one short offline **beep** (WebAudio, no file) and shows a prominent
+  auto-hiding **CRACK DETECTED** notice — once per new inspection, never on a
+  refresh, never when there's no crack, and never overlaid on the live feed.
+
+Everything is offline / LAN-only. The live POV and crack analysis are
+unchanged, and the operator dashboard was cleaned up (the technical "Live Feed
+Connection" panel was removed; the offline placeholder just reads
+"No connection").
+
 ## Drone crack geotagging & spatial mapping (optional module)
 
 An offline/Colab layer that turns pixel-space crack segmentations into

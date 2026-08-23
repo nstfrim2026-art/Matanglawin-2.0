@@ -178,6 +178,36 @@ body {
 .legend-crack { background: var(--accent); }
 .legend-ok { background: var(--ok); }
 .legend-drone { background: #3b82f6; }
+
+/* ------------------------------------------ automatic crack alert */
+.crack-alert {
+  position: fixed;
+  top: 84px;
+  right: 24px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--accent);
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(239, 68, 68, 0.45);
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  animation: crack-pop 0.25s ease-out, crack-pulse 1s ease-in-out 0.25s 3;
+}
+.crack-alert-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 0 rgba(255,255,255,0.7);
+}
+.crack-alert-text { font-size: 1.02rem; }
+.crack-alert-sub { font-weight: 600; opacity: 0.9; font-size: 0.85rem; }
+@keyframes crack-pop { from { transform: translateY(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes crack-pulse { 50% { box-shadow: 0 10px 34px rgba(239, 68, 68, 0.8); } }
+@media (max-width: 640px) {
+  .crack-alert { right: 12px; left: 12px; top: 72px; justify-content: center; }
+}
 .map-popup { color: #111; min-width: 200px; }
 .map-popup-title { font-weight: 800; margin-bottom: 6px; }
 .map-popup-img { width: 100%; border-radius: 6px; display: block; margin-bottom: 6px; }

@@ -49,6 +49,11 @@ class SrtWatcher:
         self.telemetry_store = telemetry_store
         self.db = db
         self.poll_interval = poll_interval
+        try:
+            import telemetry_store as _ts
+            self._radius_m = _ts.phone_gps_radius_m()
+        except Exception:  # noqa: BLE001
+            self._radius_m = 50.0
 
         # path -> (size, mtime, added_count)
         self._files: Dict[str, Tuple[int, float, int]] = {}
@@ -168,6 +173,7 @@ class SrtWatcher:
                         gps_time_delta_ms=match["gps_time_delta_ms"],
                         gps_source=match.get("gps_source") or "dji_srt",
                         gps_available=True,
+                        radius_m=self._radius_m,
                     ):
                         updated += 1
                 except Exception:  # noqa: BLE001

@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS inspections (
     gps_available INTEGER NOT NULL DEFAULT 0,
     gps_time_delta_ms REAL,
     gps_source TEXT,
-    captured_at TEXT
+    captured_at TEXT,
+    radius_m REAL
 );
 """
 
@@ -76,6 +77,7 @@ _EXPECTED_COLUMNS = {
     "gps_time_delta_ms": "REAL",
     "gps_source": "TEXT",
     "captured_at": "TEXT",
+    "radius_m": "REAL",
 }
 
 
@@ -95,6 +97,7 @@ class InspectionRecord:
     gps_time_delta_ms: Optional[float] = None
     gps_source: Optional[str] = None
     captured_at: Optional[str] = None
+    radius_m: Optional[float] = None
 
     @property
     def has_crack(self) -> bool:
@@ -135,6 +138,7 @@ class InspectionRecord:
             gps_time_delta_ms=self.gps_time_delta_ms,
             gps_source=self.gps_source,
             captured_at=self.captured_at,
+            radius_m=self.radius_m,
         )
         return d
 
@@ -194,6 +198,7 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         captured_at: Optional[str] = None,
+        radius_m: Optional[float] = None,
     ) -> int:
         with self._cursor() as cur:
             cur.execute(
@@ -202,8 +207,8 @@ class InspectionDB:
                     (timestamp, status, source, original_image_path,
                      highlighted_image_path, num_instances,
                      latitude, longitude, altitude_m, gps_available,
-                     gps_time_delta_ms, gps_source, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gps_time_delta_ms, gps_source, captured_at, radius_m)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -219,6 +224,7 @@ class InspectionDB:
                     gps_time_delta_ms,
                     gps_source,
                     captured_at,
+                    radius_m,
                 ),
             )
             return cur.lastrowid
@@ -253,22 +259,24 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         gps_available: bool = True,
+        radius_m: Optional[float] = None,
     ) -> bool:
         """
-        Backfill / update an inspection's aircraft location (e.g. once an SRT
-        telemetry file appears after capture - Mode B). Returns True if a row
-        was updated.
+        Backfill / update an inspection's location (e.g. once telemetry
+        appears after capture). Returns True if a row was updated. When
+        `radius_m` is given, the inspection-area radius is set too.
         """
         with self._cursor() as cur:
             cur.execute(
                 """
                 UPDATE inspections
                    SET latitude = ?, longitude = ?, gps_available = ?,
-                       gps_time_delta_ms = ?, gps_source = ?
+                       gps_time_delta_ms = ?, gps_source = ?,
+                       radius_m = COALESCE(?, radius_m)
                  WHERE id = ?
                 """,
                 (latitude, longitude, 1 if gps_available else 0,
-                 gps_time_delta_ms, gps_source, inspection_id),
+                 gps_time_delta_ms, gps_source, radius_m, inspection_id),
             )
             return cur.rowcount > 0
 
@@ -324,4 +332,5 @@ def _row_to_record(row: sqlite3.Row) -> InspectionRecord:
         gps_time_delta_ms=row["gps_time_delta_ms"] if "gps_time_delta_ms" in keys else None,
         gps_source=row["gps_source"] if "gps_source" in keys else None,
         captured_at=row["captured_at"] if "captured_at" in keys else None,
+        radius_m=row["radius_m"] if "radius_m" in keys else None,
     )

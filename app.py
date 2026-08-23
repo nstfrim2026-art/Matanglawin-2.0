@@ -242,10 +242,11 @@ _lock_obj = None
 # Cheap to construct, so it is a plain module-level singleton.
 bridge_status = BridgeStatus()
 
-# Latest aircraft telemetry (offline DJI GPS geotagging). Samples arrive at
-# POST /api/telemetry AND from the SRT watcher; captures are stamped with the
-# nearest sample in time.
-telemetry_store = TelemetryStore()
+# Latest GPS position (offline geotagging). Samples arrive at POST
+# /api/telemetry (the phone GPS collector, e.g. Colota) and captures are
+# stamped with the sample nearest in time. The latest sample is persisted
+# locally so it survives a restart.
+telemetry_store = TelemetryStore(persist_path=str(DATA_DIR / "telemetry_latest.json"))
 _srt_watcher: SrtWatcher = None
 
 
@@ -271,9 +272,11 @@ def get_service() -> InspectionService:
     if _service is None:
         with _get_lock():
             if _service is None:
+                import telemetry_store as _ts
                 _service = InspectionService(
                     get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS,
-                    telemetry_store=telemetry_store, **detector_config()
+                    telemetry_store=telemetry_store,
+                    radius_m=_ts.phone_gps_radius_m(), **detector_config()
                 )
     return _service
 
@@ -574,18 +577,32 @@ def api_inspections():
 @app.route("/api/telemetry", methods=["POST"])
 def api_telemetry():
     """
-    Ingest one aircraft GPS sample from the local collector (LAN only).
-    Body JSON: {latitude, longitude, altitude_m?, timestamp?, source?}.
-    The latest valid sample is retained in memory for capture association.
-    Invalid samples are rejected with 400 but never crash the server.
+    Ingest one GPS sample from the phone GPS collector (LAN only, e.g.
+    Colota). Body JSON: {lat, lon, timestamp} (also accepts latitude/
+    longitude for compatibility). latitude/longitude must be in range and a
+    valid timestamp must be present. Invalid samples are rejected with 400
+    but never crash the server. The latest valid sample is retained (and
+    persisted) for capture association.
     """
     data = request.get_json(silent=True) or {}
+    lat = data.get("lat", data.get("latitude"))
+    lon = data.get("lon", data.get("longitude"))
+    ts = data.get("timestamp")
+
+    # Validate before storing: coords in range + a parseable timestamp.
+    try:
+        latf, lonf = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "invalid lat/lon"}), 400
+    if not (-90.0 <= latf <= 90.0) or not (-180.0 <= lonf <= 180.0):
+        return jsonify({"ok": False, "error": "lat/lon out of range"}), 400
+    from telemetry_store import parse_timestamp_ms as _parse_ts
+    if _parse_ts(ts) is None:
+        return jsonify({"ok": False, "error": "missing or invalid timestamp"}), 400
+
     sample = telemetry_store.add(
-        latitude=data.get("latitude"),
-        longitude=data.get("longitude"),
-        altitude_m=data.get("altitude_m"),
-        timestamp=data.get("timestamp"),
-        source=data.get("source", "dji_flight_record"),
+        latitude=latf, longitude=lonf, timestamp=ts,
+        source=data.get("source", "phone_gps"),
     )
     if sample is None:
         return jsonify({"ok": False, "error": "invalid telemetry sample"}), 400
@@ -623,6 +640,9 @@ def api_inspections_geo():
         if r.latitude is None or r.longitude is None or not r.gps_available:
             continue
         m = r.to_map()
+        if m.get("radius_m") is None:
+            import telemetry_store as _ts
+            m["radius_m"] = _ts.phone_gps_radius_m()  # fallback for older/backfilled rows
         m["urls"] = _inspection_urls(r)
         points.append(m)
     return jsonify({"count": len(points), "points": points})

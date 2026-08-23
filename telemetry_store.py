@@ -33,6 +33,21 @@ DEFAULT_MAX_MATCH_MS = 2000.0
 # How old (ms) the newest sample may be before the source is "stale".
 DEFAULT_STALE_MS = 5000.0
 DEFAULT_BUFFER = 6000  # ~10 min at 10 Hz
+DEFAULT_RADIUS_M = 50.0  # inspection-area radius around the recorded GPS point
+
+
+def phone_gps_radius_m() -> float:
+    """
+    Inspection-area radius (metres) from PHONE_GPS_RADIUS_METERS (e.g. 25 /
+    50 / 100 / 200), default 50. Single source of truth so the value is not
+    hardcoded in multiple files.
+    """
+    import os
+    try:
+        v = float(os.environ.get("PHONE_GPS_RADIUS_METERS", DEFAULT_RADIUS_M))
+        return v if v > 0 else DEFAULT_RADIUS_M
+    except (TypeError, ValueError):
+        return DEFAULT_RADIUS_M
 
 
 def parse_timestamp_ms(value) -> Optional[float]:
@@ -109,16 +124,54 @@ class TelemetryStore:
         max_samples: int = DEFAULT_BUFFER,
         max_match_ms: float = DEFAULT_MAX_MATCH_MS,
         stale_ms: float = DEFAULT_STALE_MS,
+        persist_path: Optional[str] = None,
     ):
         self.max_samples = max_samples
         self.max_match_ms = max_match_ms
         self.stale_ms = stale_ms
+        self.persist_path = persist_path
         self._lock = threading.Lock()
         self._times: List[float] = []                 # sorted epoch-ms
         self._samples: List[TelemetrySample] = []      # parallel to _times
         self._latest: Optional[TelemetrySample] = None
         self._received = 0
         self._rejected = 0
+        self._load_latest()
+
+    # -- local persistence of the latest sample (offline, best-effort) --
+
+    def _load_latest(self) -> None:
+        if not self.persist_path:
+            return
+        try:
+            import json
+            with open(self.persist_path, encoding="utf-8") as f:
+                d = json.load(f)
+            self._latest = TelemetrySample(
+                float(d["latitude"]), float(d["longitude"]),
+                d.get("altitude_m"), float(d["timestamp_ms"]),
+                d.get("source", "phone_gps"),
+            )
+        except Exception:  # noqa: BLE001 - missing/corrupt file is fine
+            pass
+
+    def _save_latest(self) -> None:
+        if not self.persist_path or self._latest is None:
+            return
+        try:
+            import json
+            from pathlib import Path as _P
+            _P(self.persist_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(self.persist_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "latitude": self._latest.latitude,
+                    "longitude": self._latest.longitude,
+                    "altitude_m": self._latest.altitude_m,
+                    "timestamp_ms": self._latest.timestamp_ms,
+                    "source": self._latest.source,
+                }, f)
+        except Exception:  # noqa: BLE001 - persistence is best-effort
+            pass
 
     # -- ingest --------------------------------------------------------
 
@@ -157,9 +210,12 @@ class TelemetryStore:
                 # drop the oldest
                 self._times.pop(0)
                 self._samples.pop(0)
-            if self._latest is None or ts >= self._latest.timestamp_ms:
+            new_latest = self._latest is None or ts >= self._latest.timestamp_ms
+            if new_latest:
                 self._latest = sample
             self._received += 1
+        if new_latest:
+            self._save_latest()
         return sample
 
     # -- query ---------------------------------------------------------

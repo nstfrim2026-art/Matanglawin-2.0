@@ -55,7 +55,8 @@
           <div class="map-popup-status ${p.has_crack ? 'is-crack' : 'is-ok'}">${p.status}</div>
           <div class="map-popup-meta">Time: ${p.timestamp || '\u2014'}</div>
           <div class="map-popup-meta">Source: ${p.source_label || '\u2014'}</div>
-          <div class="map-popup-meta">Location: ${coords}${dq}</div>
+          <div class="map-popup-meta">GPS Location: ${coords}</div>
+          <div class="map-popup-meta">Inspection Radius: ${p.radius_m != null ? p.radius_m + ' m' : '\u2014'}</div>
           <a class="map-popup-link" href="/inspection/${p.id}">Open full result</a>
         </div>`;
     }
@@ -75,6 +76,12 @@
       pts.forEach((p) => {
         if (p.latitude == null || p.longitude == null) return;
         const color = p.has_crack ? '#ef4444' : '#22c55e';
+        // Inspection-area radius circle (metres) around the recorded location.
+        if (p.radius_m != null) {
+          L.circle([p.latitude, p.longitude], {
+            radius: p.radius_m, color: color, weight: 1, fillColor: color, fillOpacity: 0.12,
+          }).addTo(map);
+        }
         const marker = L.circleMarker([p.latitude, p.longitude], {
           radius: 9, color: '#0b0f14', weight: 1.5, fillColor: color, fillOpacity: 0.9,
         }).addTo(map);

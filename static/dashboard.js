@@ -28,28 +28,61 @@ function setText(id, text) {
 }
 
 // ---------------------------------------------------------------- network
-async function refreshNetwork() {
+// We only need the WebRTC URL for the live-feed iframe; the operator-facing
+// connection panel was removed, so nothing else is displayed here.
+async function refreshWebrtcUrl() {
   try {
     const res = await fetch('/api/network');
     const info = await res.json();
-    setText('net-host-ip', info.host_ip || 'Unavailable (no network detected)');
-    setText('net-rtmp-address', info.rtmp_address || 'Connect to a network first');
-    setText('net-stream-key', info.stream_key || '\u2014');
-    // Remember the WebRTC URL; the iframe is only actually loaded once a
-    // publisher is confirmed LIVE (see setPovBadge), so an offline stream
-    // never shows a broken player - the clean dark placeholder stays up.
     webrtcUrl = info.webrtc_url || null;
   } catch (err) {
-    setText('net-host-ip', 'Error loading network info');
+    /* offline-safe: keep the clean placeholder */
   }
+}
 
+// -------------------------------------------------- crack beep + alert
+// A short WebAudio beep (no audio file needed - fully offline) plus a
+// prominent, auto-hiding notification. Fires once per NEWLY completed crack
+// inspection - never per refresh, never when there is no crack.
+let audioCtx = null;
+function _unlockAudio() {
   try {
-    const res = await fetch('/api/mediamtx/status');
-    const status = await res.json();
-    setText('net-mediamtx', status.reachable ? 'Reachable' : 'Not reachable');
-  } catch (err) {
-    setText('net-mediamtx', 'Unknown');
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { /* audio unavailable */ }
+}
+document.addEventListener('click', _unlockAudio);
+document.addEventListener('keydown', _unlockAudio);
+
+function beep() {
+  try {
+    _unlockAudio();
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'square';
+    o.frequency.value = 880;
+    o.connect(g); g.connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    o.start(t);
+    o.stop(t + 0.2);
+  } catch (e) {
+    /* audio blocked (no user gesture yet) - the visual alert still shows */
   }
+}
+
+let crackAlertTimer = null;
+function showCrackAlert(rec) {
+  const el = document.getElementById('crack-alert');
+  if (!el) return;
+  const sub = document.getElementById('crack-alert-sub');
+  if (sub) sub.textContent = 'Inspection #' + rec.id;
+  el.style.display = 'flex';
+  if (crackAlertTimer) clearTimeout(crackAlertTimer);
+  crackAlertTimer = setTimeout(() => { el.style.display = 'none'; }, 6000);
 }
 
 // -------------------------------------------------------------- POV badge
@@ -157,10 +190,16 @@ function renderLatest(rec) {
   if (view) view.href = `/inspection/${rec.id}`;
 
   // Automatic-update announcement: a new inspection arrived on its own.
+  // The block runs once per NEW inspection id, so a crack beeps exactly once
+  // (never on a refresh of the same result, never when there's no crack).
   if (rec.id !== lastInspectionId) {
     if (seenAnyInspection && lastInspectionId !== null) {
       const via = rec.source === 'import' ? 'DJI capture' : 'manual upload';
       showToast(`Analysis complete \u2014 new inspection #${rec.id} (${via}): ${rec.status}`);
+      if (rec.has_crack) {
+        beep();
+        showCrackAlert(rec);
+      }
     }
     lastInspectionId = rec.id;
     seenAnyInspection = true;
@@ -177,7 +216,7 @@ async function refreshLatest() {
 }
 
 function refreshAll() {
-  refreshNetwork();
+  refreshWebrtcUrl();
   refreshPovStatus();
   refreshBridgeStatus();
   refreshLatest();

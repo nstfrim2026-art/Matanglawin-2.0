@@ -2,6 +2,13 @@
 {% set active_nav = 'dashboard' %}
 {% block title %}MatanglaWIN - Live Inspection Dashboard{% endblock %}
 {% block content %}
+  <!-- Automatic crack alert (floating; auto-hides; does not cover the feed) -->
+  <div id="crack-alert" class="crack-alert" role="alert" aria-live="assertive" style="display:none;">
+    <span class="crack-alert-dot"></span>
+    <span class="crack-alert-text">CRACK DETECTED</span>
+    <span class="crack-alert-sub" id="crack-alert-sub"></span>
+  </div>
+
   <section class="page-head">
     <div>
       <h1>Live Inspection Dashboard</h1>
@@ -23,11 +30,7 @@
       <div id="pov-placeholder" class="pov-placeholder">
         <div class="pov-placeholder-inner">
           <span class="pov-eye">&#128065;</span>
-          <p class="pov-title">Awaiting live drone feed</p>
-          <p class="hint">
-            Served directly by MediaMTX over WebRTC &mdash; no OBS, VLC, or screen mirroring,
-            and never any AI overlay, mask, or box on the live view.
-          </p>
+          <p class="pov-title">No connection</p>
         </div>
       </div>
       <iframe id="pov-iframe" class="pov-iframe" title="Live drone POV"
@@ -80,25 +83,6 @@
     </div>
   </section>
 
-  <!-- ============ Live-feed connection (dynamic, no source edits) ============ -->
-  <section class="panel net-panel">
-    <div class="panel-head">
-      <h2>Live Feed Connection</h2>
-      <a class="btn-secondary btn-small" href="{{ url_for('api_mediamtx_config') }}">Download mediamtx.yml</a>
-    </div>
-    <div class="net-grid">
-      <div class="net-item"><span class="net-label">This PC IP</span><span class="net-value" id="net-host-ip">&mdash;</span></div>
-      <div class="net-item"><span class="net-label">DJI RTMP address</span><span class="net-value" id="net-rtmp-address">&mdash;</span></div>
-      <div class="net-item"><span class="net-label">Stream key</span><span class="net-value" id="net-stream-key">&mdash;</span></div>
-      <div class="net-item"><span class="net-label">MediaMTX</span><span class="net-value" id="net-mediamtx">&mdash;</span></div>
-    </div>
-    <p class="hint">
-      Enter the RTMP address and stream key above into DJI&nbsp;Fly&rsquo;s live-stream (RTMP) setting.
-      These values follow the PC&rsquo;s current network automatically &mdash; you never edit any source
-      code, even when switching Wi-Fi. Override detection with the <code>MATANGLAWIN_HOST_IP</code>
-      environment variable if needed.
-    </p>
-  </section>
 {% endblock %}
 
 {% block scripts %}
