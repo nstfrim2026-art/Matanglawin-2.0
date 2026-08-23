@@ -27,6 +27,14 @@ function setText(id, text) {
   if (el) el.textContent = text;
 }
 
+// Coordinate + timestamp formatting shared with the result page look:
+//   latitude  -> "7.071234\u00B0 N" / "\u00B0 S"
+//   longitude -> "125.612345\u00B0 E" / "\u00B0 W"
+//   timestamp -> "2026-08-23 15:20"
+function fmtLat(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'N' : 'S'); }
+function fmtLon(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'E' : 'W'); }
+function fmtDateTime(ts) { return ts ? String(ts).replace('T', ' ').slice(0, 16) : '\u2014'; }
+
 // ---------------------------------------------------------------- network
 // We only need the WebRTC URL for the live-feed iframe; the operator-facing
 // connection panel was removed, so nothing else is displayed here.
@@ -169,29 +177,23 @@ function renderLatest(rec) {
     banner.textContent = rec.status;
     banner.className = 'status-banner ' + (rec.has_crack ? 'status-crack' : 'status-ok');
   }
-  setText('latest-timestamp', rec.timestamp);
+  setText('latest-datetime', fmtDateTime(rec.timestamp));
   setText('latest-source', rec.source_label || (rec.source === 'import' ? 'DJI import' : 'Manual upload'));
 
   // GPS location of the capture (shown once the photo has been processed).
   // Only present when an aircraft/phone GPS sample was matched at capture time.
   const hasGps = rec.gps_available && rec.latitude != null && rec.longitude != null;
-  setText('latest-gps', hasGps
-    ? `${rec.latitude.toFixed(6)}, ${rec.longitude.toFixed(6)}`
-    : 'Not recorded');
+  setText('latest-lat', hasGps ? fmtLat(rec.latitude) : 'Not recorded');
+  setText('latest-lon', hasGps ? fmtLon(rec.longitude) : 'Not recorded');
 
+  // Single analyzed photo: the red-highlighted version when a crack was found,
+  // otherwise the plain capture. (No more duplicate original+highlighted pair.)
   const urls = rec.urls || {};
-  const original = document.getElementById('latest-original');
+  const img = document.getElementById('latest-result');
+  const src = (rec.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
   // Cache-bust per inspection id so the browser always shows the new photo.
-  if (original && urls.original) original.src = urls.original + '?v=' + rec.id;
-
-  const hlCol = document.getElementById('latest-highlighted-col');
-  const hl = document.getElementById('latest-highlighted');
-  if (rec.has_crack && urls.highlighted) {
-    if (hl) hl.src = urls.highlighted + '?v=' + rec.id;
-    if (hlCol) hlCol.style.display = 'block';
-  } else if (hlCol) {
-    hlCol.style.display = 'none';
-  }
+  if (img && src) img.src = src + '?v=' + rec.id;
+  setText('latest-caption', rec.has_crack ? 'Analyzed photo (crack highlighted)' : 'Analyzed photo');
 
   const view = document.getElementById('latest-view');
   if (view) view.href = `/inspection/${rec.id}`;

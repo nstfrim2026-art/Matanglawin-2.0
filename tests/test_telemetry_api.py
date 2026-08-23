@@ -85,10 +85,12 @@ def test_capture_is_geotagged_with_nearest_sample(client):
     assert abs(j["latitude"] - 7.123456) < 1e-6
     assert abs(j["longitude"] - 125.654321) < 1e-6
 
-    # ...and rendered on the inspection result page ("the description itself").
+    # ...and rendered on the inspection result page ("the description itself")
+    # in the labeled readout, with hemisphere suffixes.
     body = client.get(f"/inspection/{j['id']}").data.decode()
-    assert "GPS location" in body
-    assert "7.123456, 125.654321" in body
+    assert "Latitude" in body and "Longitude" in body
+    assert "7.123456&deg; N" in body
+    assert "125.654321&deg; E" in body
 
 
 def test_capture_without_gps_still_works_and_has_no_coords(client):
@@ -100,7 +102,7 @@ def test_capture_without_gps_still_works_and_has_no_coords(client):
     assert j["latitude"] is None and j["longitude"] is None
     # the result page shows a graceful placeholder, never a blank/broken value
     body = client.get(f"/inspection/{j['id']}").data.decode()
-    assert "GPS location" in body and "Not recorded" in body
+    assert "Latitude" in body and "Not recorded" in body
 
 
 def test_stale_far_sample_not_attached(client):

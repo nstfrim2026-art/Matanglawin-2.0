@@ -36,10 +36,6 @@
       <iframe id="pov-iframe" class="pov-iframe" title="Live drone POV"
               allow="autoplay; fullscreen" style="display:none;"></iframe>
     </div>
-    <p class="pov-caption">
-      Use the DJI controller shutter button to capture an inspection photo. The live view is
-      for monitoring only &mdash; cracks are analyzed per captured still, never on this feed.
-    </p>
   </section>
 
   <!-- ============ PIPELINE B: latest automatic photo inspection ============ -->
@@ -63,22 +59,19 @@
     <div id="latest-content" class="latest-layout" style="display:none;">
       <div class="latest-status-col">
         <div class="status-banner" id="latest-status">&mdash;</div>
-        <dl class="meta-list">
-          <div><dt>Captured</dt><dd id="latest-timestamp">&mdash;</dd></div>
+        <dl class="readout">
+          <div><dt>Latitude</dt><dd id="latest-lat">&mdash;</dd></div>
+          <div><dt>Longitude</dt><dd id="latest-lon">&mdash;</dd></div>
+          <div><dt>Date / Time</dt><dd id="latest-datetime">&mdash;</dd></div>
           <div><dt>Source</dt><dd id="latest-source">&mdash;</dd></div>
-          <div><dt>GPS location</dt><dd id="latest-gps">&mdash;</dd></div>
         </dl>
         <a id="latest-view" class="btn-secondary" href="#">Open full result</a>
       </div>
 
-      <div class="latest-images" id="latest-images">
+      <div class="latest-images single" id="latest-images">
         <figure class="shot">
-          <figcaption>Original photo</figcaption>
-          <img id="latest-original" class="shot-img" alt="Original photo">
-        </figure>
-        <figure class="shot" id="latest-highlighted-col" style="display:none;">
-          <figcaption>Red-highlighted</figcaption>
-          <img id="latest-highlighted" class="shot-img" alt="Crack highlighted photo">
+          <figcaption id="latest-caption">Analyzed photo</figcaption>
+          <img id="latest-result" class="shot-img" alt="Analyzed inspection photo">
         </figure>
       </div>
     </div>
