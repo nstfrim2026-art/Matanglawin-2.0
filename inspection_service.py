@@ -32,6 +32,7 @@ status and the two images above.
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 import uuid
@@ -149,22 +150,40 @@ class InspectionService:
 
     # -- public API ----------------------------------------------------
 
-    def analyze_file(self, image_path: str, source: str = "upload", captured_at=None) -> InspectionRecord:
-        """Analyze an image file on disk. Raises InvalidImageError if unreadable."""
+    def analyze_file(self, image_path: str, source: str = "upload", captured_at=None,
+                     capture_id=None) -> InspectionRecord:
+        """
+        Analyze an image file on disk. Raises InvalidImageError if unreadable.
+
+        ``capture_id`` (optional) is the unique identity of one physical
+        capture. When given, a capture already in the database is returned
+        as-is instead of being analyzed/inserted again (one capture -> one
+        inspection). Manual uploads pass None.
+        """
+        # Dedup BEFORE decoding/inference so a repeat capture costs nothing.
+        if capture_id:
+            existing = self.db.get_by_capture_id(capture_id)
+            if existing is not None:
+                return existing
         img = cv2.imread(str(image_path))
         if img is None or img.size == 0:
             raise InvalidImageError(f"Could not read image: {image_path}")
-        return self._analyze(img, source=source, captured_at=captured_at)
+        return self._analyze(img, source=source, captured_at=captured_at, capture_id=capture_id)
 
-    def analyze_array(self, img_bgr, source: str = "upload", captured_at=None) -> InspectionRecord:
+    def analyze_array(self, img_bgr, source: str = "upload", captured_at=None,
+                      capture_id=None) -> InspectionRecord:
         """Analyze an already-decoded BGR image array."""
+        if capture_id:
+            existing = self.db.get_by_capture_id(capture_id)
+            if existing is not None:
+                return existing
         if img_bgr is None or getattr(img_bgr, "size", 0) == 0:
             raise InvalidImageError("Empty image array")
-        return self._analyze(img_bgr, source=source, captured_at=captured_at)
+        return self._analyze(img_bgr, source=source, captured_at=captured_at, capture_id=capture_id)
 
     # -- internals -----------------------------------------------------
 
-    def _analyze(self, img_bgr, source: str, captured_at=None) -> InspectionRecord:
+    def _analyze(self, img_bgr, source: str, captured_at=None, capture_id=None) -> InspectionRecord:
         detector = self._get_detector()
         result = detector.process_frame(img_bgr)
 
@@ -203,41 +222,59 @@ class InspectionService:
             # the original (there is no red-highlighted image to show).
             cv2.imwrite(str(highlighted_path), img_bgr)
 
-        # Associate the nearest aircraft GPS sample to the capture time
-        # (offline geotagging). Never blocks analysis: any problem here just
-        # yields gps_available=False.
+        # GPS geotagging is for AUTOMATIC captures only (source == "import").
+        # A manual upload is deliberately independent of the phone GPS: it
+        # NEVER inherits the current/latest Colota position, and - because we
+        # store no capture time for it - it is never backfilled from an SRT
+        # file later either. So a manual upload always has:
+        #   latitude = longitude = None, gps_available = False, gps_source = None.
         gps = {"gps_available": False, "gps_time_delta_ms": None, "latitude": None,
                "longitude": None, "altitude_m": None, "gps_source": None}
-        # ALWAYS record the capture time (even with no telemetry yet), so an
-        # SRT file that appears later can backfill this inspection's location
-        # by nearest-timestamp match (Mode B).
-        captured_iso = captured_at if isinstance(captured_at, str) and captured_at else ts_str
-        if self.telemetry_store is not None:
-            try:
-                import telemetry_store as _ts
-                capture_ms = _ts.parse_timestamp_ms(captured_at)
-                if capture_ms is None:
-                    capture_ms = now * 1000.0
-                match = self.telemetry_store.match_for_capture(capture_ms)
-                gps.update({k: match[k] for k in gps})
-            except Exception:  # noqa: BLE001 - geotag is best-effort only
-                pass
+        captured_iso = None
+        if source == "import":
+            # Record the capture time so a late SRT file can backfill by
+            # nearest-timestamp match (Mode B).
+            captured_iso = captured_at if isinstance(captured_at, str) and captured_at else ts_str
+            if self.telemetry_store is not None:
+                try:
+                    import telemetry_store as _ts
+                    capture_ms = _ts.parse_timestamp_ms(captured_at)
+                    if capture_ms is None:
+                        capture_ms = now * 1000.0
+                    # match_for_capture only returns a fix when a sample is
+                    # within the freshness window of the capture time, so a
+                    # stale/last-known position (e.g. Colota turned off) is
+                    # NOT reused - it yields gps_available=False.
+                    match = self.telemetry_store.match_for_capture(capture_ms)
+                    gps.update({k: match[k] for k in gps})
+                except Exception:  # noqa: BLE001 - geotag is best-effort only
+                    pass
 
-        inspection_id = self.db.add_inspection(
-            timestamp=ts_str,
-            status=status,
-            source=source,
-            original_image_path=str(original_path),
-            highlighted_image_path=str(highlighted_path),
-            num_instances=result.num_instances,
-            latitude=gps["latitude"],
-            longitude=gps["longitude"],
-            altitude_m=gps["altitude_m"],
-            gps_available=gps["gps_available"],
-            gps_time_delta_ms=gps["gps_time_delta_ms"],
-            gps_source=gps["gps_source"],
-            captured_at=captured_iso,
-            radius_m=self.radius_m if gps["gps_available"] else None,
-        )
+        try:
+            inspection_id = self.db.add_inspection(
+                timestamp=ts_str,
+                status=status,
+                source=source,
+                original_image_path=str(original_path),
+                highlighted_image_path=str(highlighted_path),
+                num_instances=result.num_instances,
+                latitude=gps["latitude"],
+                longitude=gps["longitude"],
+                altitude_m=gps["altitude_m"],
+                gps_available=gps["gps_available"],
+                gps_time_delta_ms=gps["gps_time_delta_ms"],
+                gps_source=gps["gps_source"],
+                captured_at=captured_iso,
+                radius_m=self.radius_m if gps["gps_available"] else None,
+                capture_id=capture_id,
+            )
+        except sqlite3.IntegrityError:
+            # A concurrent insert with the same capture_id won the race (the
+            # DB UNIQUE index). Return that single existing record instead of
+            # creating a duplicate - one capture always maps to one inspection.
+            existing = self.db.get_by_capture_id(capture_id) if capture_id else None
+            if existing is not None:
+                return existing
+            raise
 
         return self.db.get_inspection(inspection_id)

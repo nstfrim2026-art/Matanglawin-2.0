@@ -188,8 +188,12 @@ class PhotoImportWatcher:
                 continue
 
             # -- analyze once --
+            # Pass the content hash as capture_id: it is the SAME identity the
+            # HTTP /api/import transport uses, so the DB-level uniqueness makes
+            # one physical capture map to exactly one inspection even if the
+            # same photo also arrives over HTTP.
             try:
-                record = self.service.analyze_file(str(path), source="import")
+                record = self.service.analyze_file(str(path), source="import", capture_id=file_hash)
             except InvalidImageError:
                 self._handled_signatures.add(signature)
                 self._pending.pop(key, None)

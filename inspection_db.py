@@ -58,9 +58,22 @@ CREATE TABLE IF NOT EXISTS inspections (
     gps_time_delta_ms REAL,
     gps_source TEXT,
     captured_at TEXT,
-    radius_m REAL
+    radius_m REAL,
+    capture_id TEXT
 );
 """
+
+# capture_id is the single identity of one physical capture, threaded through
+# the whole automatic pipeline (image save -> import -> service -> DB). A
+# partial UNIQUE index enforces "one capture -> one inspection" at the storage
+# layer: any second insert with the same capture_id fails, so duplicates are
+# impossible even under a race or two import transports. Manual uploads pass
+# capture_id = NULL (SQLite allows many NULLs in a UNIQUE index), so each
+# manual upload remains its own record.
+CAPTURE_ID_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_inspections_capture_id "
+    "ON inspections(capture_id) WHERE capture_id IS NOT NULL"
+)
 
 # Columns that may be missing from an older on-disk DB and need adding.
 _EXPECTED_COLUMNS = {
@@ -77,6 +90,7 @@ _EXPECTED_COLUMNS = {
     "gps_source": "TEXT",
     "captured_at": "TEXT",
     "radius_m": "REAL",
+    "capture_id": "TEXT",
 }
 
 
@@ -97,6 +111,7 @@ class InspectionRecord:
     gps_source: Optional[str] = None
     captured_at: Optional[str] = None
     radius_m: Optional[float] = None
+    capture_id: Optional[str] = None
 
     @property
     def has_crack(self) -> bool:
@@ -144,6 +159,10 @@ class InspectionDB:
         with self._conn:
             self._conn.execute(SCHEMA)
         self._migrate()
+        # Enforce one-capture-one-inspection at the DB level (after migrate so
+        # the capture_id column exists on upgraded databases too).
+        with self._conn:
+            self._conn.execute(CAPTURE_ID_INDEX)
 
     def _migrate(self) -> None:
         with self._lock:
@@ -184,7 +203,14 @@ class InspectionDB:
         gps_source: Optional[str] = None,
         captured_at: Optional[str] = None,
         radius_m: Optional[float] = None,
+        capture_id: Optional[str] = None,
     ) -> int:
+        """
+        Insert one inspection and return its id. If ``capture_id`` is given
+        and a row with that capture_id already exists, this raises
+        ``sqlite3.IntegrityError`` (the UNIQUE index) - callers use that to
+        keep "one capture -> one inspection".
+        """
         with self._cursor() as cur:
             cur.execute(
                 """
@@ -192,8 +218,9 @@ class InspectionDB:
                     (timestamp, status, source, original_image_path,
                      highlighted_image_path, num_instances,
                      latitude, longitude, altitude_m, gps_available,
-                     gps_time_delta_ms, gps_source, captured_at, radius_m)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gps_time_delta_ms, gps_source, captured_at, radius_m,
+                     capture_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -210,6 +237,7 @@ class InspectionDB:
                     gps_source,
                     captured_at,
                     radius_m,
+                    capture_id,
                 ),
             )
             return cur.lastrowid
@@ -217,6 +245,15 @@ class InspectionDB:
     def get_inspection(self, inspection_id: int) -> Optional[InspectionRecord]:
         with self._cursor() as cur:
             cur.execute("SELECT * FROM inspections WHERE id = ?", (inspection_id,))
+            row = cur.fetchone()
+        return _row_to_record(row) if row else None
+
+    def get_by_capture_id(self, capture_id: str) -> Optional[InspectionRecord]:
+        """The inspection for a given capture_id, or None. Used for dedup."""
+        if not capture_id:
+            return None
+        with self._cursor() as cur:
+            cur.execute("SELECT * FROM inspections WHERE capture_id = ?", (capture_id,))
             row = cur.fetchone()
         return _row_to_record(row) if row else None
 
@@ -277,6 +314,7 @@ class InspectionDB:
                 SELECT * FROM inspections
                  WHERE (gps_available = 0 OR gps_available IS NULL)
                    AND captured_at IS NOT NULL AND captured_at != ''
+                   AND source = 'import'
                  ORDER BY id DESC LIMIT ?
                 """,
                 (limit,),
@@ -289,6 +327,25 @@ class InspectionDB:
             cur.execute("SELECT COUNT(*) AS c FROM inspections")
             row = cur.fetchone()
         return int(row["c"]) if row else 0
+
+    def counts(self) -> dict:
+        """
+        Dashboard summary straight from the DB:
+            {"total": N, "cracks": C, "clear": N - C}
+        `cracks` counts rows whose status is CRACK DETECTED; `clear` is
+        everything else. No model/debug metrics are involved.
+        """
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS cracks "
+                "FROM inspections",
+                (STATUS_CRACK,),
+            )
+            row = cur.fetchone()
+        total = int(row["total"]) if row and row["total"] is not None else 0
+        cracks = int(row["cracks"]) if row and row["cracks"] is not None else 0
+        return {"total": total, "cracks": cracks, "clear": total - cracks}
 
     def delete_inspection(self, inspection_id: int) -> bool:
         with self._cursor() as cur:
@@ -318,4 +375,5 @@ def _row_to_record(row: sqlite3.Row) -> InspectionRecord:
         gps_source=row["gps_source"] if "gps_source" in keys else None,
         captured_at=row["captured_at"] if "captured_at" in keys else None,
         radius_m=row["radius_m"] if "radius_m" in keys else None,
+        capture_id=row["capture_id"] if "capture_id" in keys else None,
     )

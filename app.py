@@ -496,7 +496,13 @@ def api_import():
     try:
         tmp_path.write_bytes(data)
         log.info("[MATANGLAWIN] Inspection started")
-        record = get_service().analyze_file(str(tmp_path), source="import", captured_at=captured_at)
+        # The content hash is this capture's unique identity. Passing it as
+        # capture_id makes "one capture -> one inspection" hold at the DB
+        # level, and it is the SAME key the watch-folder transport uses, so
+        # the same photo arriving by both routes can never create two records.
+        record = get_service().analyze_file(
+            str(tmp_path), source="import", captured_at=captured_at, capture_id=digest
+        )
     except InvalidImageError:
         log.warning("[PHOTO BRIDGE] Rejected: not a readable image: %s", filename or digest[:12])
         return jsonify({"error": "invalid or corrupt image"}), 400
@@ -566,6 +572,17 @@ def api_inspections():
     records = db.list_inspections(limit=limit)
     items = [_record_payload(r) for r in records]
     return jsonify({"count": db.count(), "inspections": items})
+
+
+@app.route("/api/inspections/summary", methods=["GET"])
+def api_inspections_summary():
+    """
+    Dashboard summary counters from the actual database:
+        {"total": N, "cracks": C, "clear": N - C}
+    Updates automatically as new inspections are created (the dashboard
+    polls this). No model/debug metrics are exposed.
+    """
+    return jsonify(get_db().counts())
 
 
 # ===========================================================================

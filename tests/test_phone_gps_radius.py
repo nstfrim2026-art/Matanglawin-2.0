@@ -96,32 +96,33 @@ def test_telemetry_rejects_out_of_range(client):
 
 # -- configurable radius on capture ---------------------------------
 
-def test_capture_with_gps_surfaces_coords_and_stores_radius(client, monkeypatch):
+def test_automatic_capture_with_gps_surfaces_coords_and_stores_radius(client, monkeypatch):
     import app as appmod
     monkeypatch.setenv("PHONE_GPS_RADIUS_METERS", "100")
     monkeypatch.setattr(appmod, "_service", None)  # rebuild service with new radius
     stubs.stub_one_crack(inference_core)
     client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321, "timestamp": _TS})
-    j = client.post("/api/inspect", data={
-        "image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg"), "captured_at": _TS,
-    }, content_type="multipart/form-data").get_json()
+    # AUTOMATIC capture (DJI import) is the path that receives GPS.
+    j = client.post("/api/import", data=stubs.jpg_bytes(value=201),
+                    content_type="image/jpeg",
+                    headers={"X-Filename": "DJI_1.jpg", "X-Captured-At": _TS}).get_json()
     assert j["status"] == "CRACK DETECTED"
     # capture coordinates are surfaced in the inspection details
     assert j["gps_available"] is True
     assert abs(j["latitude"] - 7.123456) < 1e-6 and abs(j["longitude"] - 125.654321) < 1e-6
-    # radius is stored on the record (no longer displayed, but kept as metadata)
-    # while accuracy/altitude are never stored/exposed
+    # radius is stored on the record (metadata) while accuracy/altitude are never exposed
     assert "radius_m" not in j and "accuracy" not in j and "altitude_m" not in j
     rec = appmod.get_db().get_inspection(j["id"])
     assert rec.radius_m == 100
     assert rec.altitude_m is None
 
 
-def test_capture_without_gps_has_no_coords_and_no_radius(client):
+def test_automatic_capture_without_gps_has_no_coords_and_no_radius(client):
     import app as appmod
     stubs.stub_no_crack(inference_core)
-    j = client.post("/api/inspect", data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
-                    content_type="multipart/form-data").get_json()
+    j = client.post("/api/import", data=stubs.jpg_bytes(value=202),
+                    content_type="image/jpeg",
+                    headers={"X-Filename": "DJI_2.jpg"}).get_json()
     assert j["status"] == "NO CRACK DETECTED"       # analysis still runs
     assert j["gps_available"] is False
     assert j["latitude"] is None and j["longitude"] is None

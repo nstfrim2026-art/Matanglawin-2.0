@@ -320,6 +320,40 @@ body {
 .status-alarm { animation: status-alarm-pulse 1.1s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .status-alarm { animation: none; } }
 
+/* Dashboard summary counters (INSPECTIONS / CRACKS DETECTED / CLEAR) */
+.summary-panel { padding: 18px; }
+.summary-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.summary-card {
+  text-align: center;
+  padding: 18px 12px;
+  border: 1px solid var(--panel-border-2);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+}
+.summary-card dt {
+  margin: 0 0 6px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+}
+.summary-card dd {
+  margin: 0;
+  font-size: 2.4rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+.summary-card-crack dd { color: var(--accent); }
+.summary-card-clear dd { color: var(--ok); }
+@media (max-width: 620px) { .summary-grid { grid-template-columns: 1fr; } }
+
 .latest-images,
 .result-images {
   display: grid;

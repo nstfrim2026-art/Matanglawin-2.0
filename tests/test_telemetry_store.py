@@ -83,3 +83,16 @@ def test_empty_store_match_is_safe():
     assert m["gps_available"] is False
     latest, stale = s.latest()
     assert latest is None and stale is True
+
+
+def test_old_sample_is_not_reused_for_a_later_capture():
+    # A fix arrives (Colota on), then Colota stops. A capture that happens
+    # well after the freshness window must NOT reuse that last-known fix.
+    s = TelemetryStore(max_match_ms=2000)
+    s.add(7.1, 125.6, timestamp=_BASE)
+    # right away it matches
+    assert s.match_for_capture(_BASE + 100)["gps_available"] is True
+    # 10 s later (Colota off, no new samples) the old fix is not reused
+    later = s.match_for_capture(_BASE + 10_000)
+    assert later["gps_available"] is False
+    assert later["latitude"] is None and later["gps_source"] is None

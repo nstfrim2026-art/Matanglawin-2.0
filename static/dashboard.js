@@ -224,11 +224,27 @@ async function refreshLatest() {
   }
 }
 
+// -------------------------------------------------- summary counters
+// Total inspections / cracks detected / clear, straight from the DB. Polled
+// so the counters update automatically whenever a new inspection is created.
+async function refreshSummary() {
+  try {
+    const res = await fetch('/api/inspections/summary');
+    const s = await res.json();
+    setText('summary-total', s.total != null ? s.total : 0);
+    setText('summary-cracks', s.cracks != null ? s.cracks : 0);
+    setText('summary-clear', s.clear != null ? s.clear : 0);
+  } catch (err) {
+    /* leave last known counts on screen */
+  }
+}
+
 function refreshAll() {
   refreshWebrtcUrl();
   refreshPovStatus();
   refreshBridgeStatus();
   refreshLatest();
+  refreshSummary();
 }
 
 refreshAll();
