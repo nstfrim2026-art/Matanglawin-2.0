@@ -143,6 +143,18 @@ def _configured_dirs(env_name: str, default: str = "") -> list:
 SRT_DIRS = _configured_dirs("MATANGLAWIN_SRT_DIR", str(DATA_DIR / "srt")) + \
     _configured_dirs("MATANGLAWIN_CAPTURE_DIR", "")
 
+# Local offline map tiles served at /maps/<z>/<x>/<y>.png. Configurable so
+# the tile dataset can be swapped without touching the frontend. Default is
+# static/maps (the operator drops a real offline tile pack there - see README;
+# no tiles are fabricated). Override with MATANGLAWIN_MAP_TILES_DIR.
+MAP_TILES_DIR = Path(
+    os.environ.get("MATANGLAWIN_MAP_TILES_DIR", str(RESOURCE_DIR / "static" / "maps"))
+)
+try:
+    MAP_TILES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass  # read-only (e.g. bundled) - operator sets MATANGLAWIN_MAP_TILES_DIR
+
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 # Generous limit - a DJI Neo 2 full-resolution JPEG is only a few MB, but
@@ -406,6 +418,35 @@ def inspections_page():
 def map_page():
     """Offline inspection map (locally vendored Leaflet, no cloud provider)."""
     return render_template("map.html")
+
+
+@app.route("/maps/<int:z>/<int:x>/<int:y>.png", methods=["GET"])
+def map_tile(z, x, y):
+    """
+    Serve a single offline map tile from the local tile store
+    (MAP_TILES_DIR/<z>/<x>/<y>.png). z/x/y are ints (Flask converter), so no
+    path traversal is possible. Missing tiles return 404 - the frontend then
+    shows a clean "Map data unavailable" fallback rather than a blank map.
+    No external tile server is contacted.
+    """
+    tile = MAP_TILES_DIR / str(z) / str(x) / f"{y}.png"
+    if not tile.is_file():
+        abort(404)
+    return send_file(str(tile), mimetype="image/png")
+
+
+@app.route("/api/map/available", methods=["GET"])
+def api_map_available():
+    """Whether a local offline tile pack is present (drives the map fallback)."""
+    available = False
+    try:
+        for z in MAP_TILES_DIR.iterdir():
+            if z.is_dir() and next(z.rglob("*.png"), None) is not None:
+                available = True
+                break
+    except OSError:
+        available = False
+    return jsonify({"available": available, "tiles_dir": str(MAP_TILES_DIR)})
 
 
 @app.route("/health", methods=["GET"])

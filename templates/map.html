@@ -17,7 +17,10 @@
   </section>
 
   <section class="panel">
-    <div id="map" class="map-canvas"></div>
+    <div class="map-wrap">
+      <div id="map" class="map-canvas"></div>
+      <div id="map-fallback" class="map-fallback" style="display:none;">Map data unavailable</div>
+    </div>
     <p id="map-empty" class="hint" style="display:none;">
       No geolocated inspections yet. Inspections get a marker once an aircraft
       GPS sample (POST /api/telemetry from the local collector) is available at
@@ -30,17 +33,40 @@
 {% block scripts %}
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script>
-    // Fully offline: no cloud map provider. By default there is no basemap
-    // (markers are placed on a neutral pane and the view fits to them). To
-    // show geography offline, point this at a LOCAL tile server you host,
-    // e.g. "http://localhost:8080/tile/{z}/{x}/{y}.png".
-    const LOCAL_TILE_URL = "";
+    // Fully offline: tiles are served by MatanglaWIN itself from local files
+    // at /maps/{z}/{x}/{y}.png (no cloud/OSM/Google/Esri). The tile dataset
+    // can be swapped on the server (MAP_TILES_DIR) without changing this
+    // frontend. Missing tiles render transparent and a clean
+    // "Map data unavailable" fallback is shown instead of a blank map.
+    const TRANSPARENT_TILE =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
     const map = L.map('map', { zoomControl: true });
     map.setView([14.5995, 120.9842], 5);  // neutral default until markers load
-    if (LOCAL_TILE_URL) {
-      L.tileLayer(LOCAL_TILE_URL, { maxZoom: 22, attribution: 'Local tiles' }).addTo(map);
-    }
+
+    const fallbackEl = document.getElementById('map-fallback');
+    function showFallback() { if (fallbackEl) fallbackEl.style.display = 'flex'; }
+    function hideFallback() { if (fallbackEl) fallbackEl.style.display = 'none'; }
+
+    const tiles = L.tileLayer('/maps/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      minZoom: 1,
+      attribution: 'Local inspection map',
+      errorTileUrl: TRANSPARENT_TILE,   // no broken-image icons for missing tiles
+    }).addTo(map);
+
+    // The fallback is driven by the server's authoritative "is a tile pack
+    // installed?" check - not by tile load/error events (a missing tile loads
+    // the transparent placeholder, which would otherwise look like success).
+    let tilesAvailable = false;
+    fetch('/api/map/available')
+      .then((r) => r.json())
+      .then((d) => {
+        tilesAvailable = !!d.available;
+        if (tilesAvailable) { hideFallback(); } else { showFallback(); }
+      })
+      .catch(() => { showFallback(); });
+    tiles.on('tileerror', () => { if (!tilesAvailable) showFallback(); });
 
     function popupHtml(p) {
       const urls = p.urls || {};

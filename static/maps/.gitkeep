@@ -1,0 +1,4 @@
+# Offline map tiles live here as {z}/{x}/{y}.png and are served at
+# /maps/{z}/{x}/{y}.png. This folder is intentionally empty in the repo -
+# drop a real offline tile pack here (see README, "Offline map tiles").
+# The tile dataset can also be pointed elsewhere with MATANGLAWIN_MAP_TILES_DIR.

@@ -482,6 +482,28 @@ point), not exact aircraft coordinates.
   circle — **red = CRACK / green = NO CRACK / blue = current phone location**
   (blue only while fresh). Click a marker for the image, result, time, and
   radius. If GPS is unavailable a capture still analyzes — it just has no marker.
+
+### Offline map tiles (one-time setup)
+
+The basemap is served **by MatanglaWIN itself** from local files — no
+internet, no OpenStreetMap/Google/Mapbox/Esri at runtime:
+
+```
+Browser → /maps/{z}/{x}/{y}.png → MatanglaWIN → static/maps/{z}/{x}/{y}.png
+```
+
+Drop a real offline tile pack into `static/maps/` in the standard
+`{z}/{x}/{y}.png` layout (or point `MATANGLAWIN_MAP_TILES_DIR` at a folder
+elsewhere — the frontend never changes). Prepare the pack **once** on an
+internet-connected machine for just your inspection area, e.g. with a tile
+downloader/exporter such as **MOBAC** (Mobile Atlas Creator) that outputs a
+plain `{z}/{x}/{y}.png` folder tree, then copy those `z/x/y` folders into
+`static/maps/`. No tiles are bundled or fabricated.
+
+Until a tile pack is installed, the map shows a clean **"Map data
+unavailable"** panel (never a blank/broken map) and **still renders all
+inspection markers + radius circles**, which remain fully clickable. Check
+`GET /api/map/available` to see whether a pack is installed.
 - **Crack alert:** when a new inspection detects a crack, the dashboard plays
   one short offline **beep** (WebAudio, no file) and shows a prominent
   auto-hiding **CRACK DETECTED** notice — once per new inspection, never on a
