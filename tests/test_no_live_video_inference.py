@@ -29,6 +29,7 @@ RUNTIME_PY_FILES = [
     "dji_gps_collector.py",
     "srt_telemetry.py",
     "srt_watcher.py",
+    "capture_service.py",
 ]
 
 

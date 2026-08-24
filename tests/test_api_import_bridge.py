@@ -121,10 +121,15 @@ def test_bridge_status_offline_then_ready(client):
     assert s2["photos_received"] == 1
 
 
-def test_dashboard_shows_photo_bridge_indicator(client):
+def test_dashboard_is_clean_and_bridge_status_api_still_works(client):
+    # The Live Dashboard is intentionally clean: it focuses on the live POV
+    # and the Capture Photo button, and no longer surfaces the photo-bridge
+    # badge. The bridge ingest + status API remain available (DJI import path).
     body = client.get("/").data.decode()
-    assert "PHOTO BRIDGE" in body
-    assert "bridge-badge" in body
+    assert "PHOTO BRIDGE" not in body
+    assert 'id="capture-btn"' in body
+    snap = client.get("/api/bridge/status").get_json()
+    assert "state" in snap
 
 
 def test_import_does_not_touch_manual_upload_source(client):

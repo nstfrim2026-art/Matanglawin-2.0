@@ -142,6 +142,22 @@ class InspectionRecord:
             "longitude": self.longitude if self.gps_available else None,
         }
 
+    def to_map(self) -> dict:
+        """
+        View for the offline inspection MAP: the operator-safe fields plus the
+        stored capture coordinates + inspection radius. GPS accuracy is never
+        included. Used only by the map/points API, never by prohibited surfaces.
+        """
+        d = self.to_dict()
+        d.update(
+            latitude=self.latitude,
+            longitude=self.longitude,
+            gps_time_delta_ms=self.gps_time_delta_ms,
+            captured_at=self.captured_at,
+            radius_m=self.radius_m,
+        )
+        return d
+
 
 class InspectionDB:
     """

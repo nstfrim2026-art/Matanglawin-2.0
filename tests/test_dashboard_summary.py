@@ -84,17 +84,21 @@ def test_summary_endpoint_reflects_db_and_updates(client):
         "total": 4, "cracks": 2, "clear": 2}
 
 
-def test_dashboard_page_has_summary_counters(client):
-    body = client.get("/").data.decode()
-    assert 'id="summary-total"' in body
-    assert 'id="summary-cracks"' in body
-    assert 'id="summary-clear"' in body
-    # human-readable labels present
-    assert "Inspections" in body
-    assert "Cracks Detected" in body
-    assert "Clear" in body
+def test_summary_counters_live_in_the_inspection_section_not_the_dashboard(client):
+    # Inspection status (count / cracks / clear) belongs in the Inspection
+    # section, NOT the Live Dashboard.
+    dash = client.get("/").data.decode()
+    assert 'id="summary-total"' not in dash
+    assert "Cracks Detected" not in dash
+
+    insp = client.get("/inspections").data.decode()
+    assert 'id="summary-total"' in insp
+    assert 'id="summary-cracks"' in insp
+    assert 'id="summary-clear"' in insp
+    assert "Cracks Detected" in insp
+    assert "Clear" in insp
 
 
-def test_dashboard_js_polls_summary_endpoint():
-    js = (Path(__file__).resolve().parent.parent / "static" / "dashboard.js").read_text()
-    assert "/api/inspections/summary" in js
+def test_inspections_page_polls_summary_endpoint():
+    html = (Path(__file__).resolve().parent.parent / "templates" / "inspections.html").read_text()
+    assert "/api/inspections/summary" in html

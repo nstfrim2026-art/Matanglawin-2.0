@@ -47,18 +47,24 @@ def test_dashboard_is_the_main_page(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert b"Live Drone POV" in resp.data
-    assert b"Latest Inspection" in resp.data
+    # The production capture control lives on the dashboard.
+    assert b"Capture Photo" in resp.data
+    assert b'id="capture-btn"' in resp.data
 
 
 def test_dashboard_pov_is_clean_display_only(client):
     resp = client.get("/")
     body = resp.data.decode()
-    # The shutter-capture workflow is still described (in the intro lede), but
-    # the redundant POV caption sentence was removed.
-    assert "shutter" in body.lower()
+    # The old "press the shutter on the controller ... transferred ... no upload,
+    # no Analyze button" explanatory paragraph was removed entirely (the
+    # workflow is now the Capture Photo button).
+    assert "shutter" not in body.lower()
+    assert "no analyze button" not in body.lower()
     assert "monitoring only" not in body.lower()
-    # No bounding-box / confidence / FPS language anywhere on the page.
-    for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only"):
+    # No bounding-box / confidence / FPS / overlay language anywhere on the page
+    # (the live view is clean; AI results appear only in the Inspection section).
+    for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only",
+                   "segmentation overlay"):
         assert banned.lower() not in body.lower()
 
 

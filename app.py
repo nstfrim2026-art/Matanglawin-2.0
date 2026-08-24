@@ -88,7 +88,9 @@ from detector import (
     DEFAULT_TILED,
     DEFAULT_UNSHARP,
 )
+from capture_service import CaptureService, CaptureError, default_pictures_dir
 from import_ledger import ImportLedger, hash_bytes
+import telemetry_store as _telemetry_module
 from telemetry_store import TelemetryStore
 from srt_watcher import SrtWatcher
 from inference_core import DEFAULT_REFINE, get_model
@@ -142,6 +144,24 @@ def _configured_dirs(env_name: str, default: str = "") -> list:
 #   set MATANGLAWIN_SRT_DIR=%USERPROFILE%\Videos\DJI
 SRT_DIRS = _configured_dirs("MATANGLAWIN_SRT_DIR", str(DATA_DIR / "srt")) + \
     _configured_dirs("MATANGLAWIN_CAPTURE_DIR", "")
+
+# Local offline map tiles served at /maps/<z>/<x>/<y>.png. Configurable so the
+# tile dataset can be swapped without touching the frontend. Default is
+# static/maps (the operator drops a real offline tile pack there - see README;
+# no tiles are fabricated). Override with MATANGLAWIN_MAP_TILES_DIR.
+MAP_TILES_DIR = Path(
+    os.environ.get("MATANGLAWIN_MAP_TILES_DIR", str(RESOURCE_DIR / "static" / "maps"))
+)
+try:
+    MAP_TILES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass  # read-only (e.g. bundled) - operator sets MATANGLAWIN_MAP_TILES_DIR
+
+# Where photos captured from the live MediaMTX stream are written. Default is
+# the DJI-style pictures folder in the user's profile; override with
+# MATANGLAWIN_PICTURES_DIR. Created lazily on first capture (never crashes if
+# it can't be created up front).
+PICTURES_DIR = default_pictures_dir()
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -236,6 +256,7 @@ _db: InspectionDB = None
 _service: InspectionService = None
 _watcher: PhotoImportWatcher = None
 _import_ledger: ImportLedger = None
+_capture_service: CaptureService = None
 _lock_obj = None
 
 # Liveness of the automatic photo-transfer bridge (companion uploader).
@@ -246,7 +267,11 @@ bridge_status = BridgeStatus()
 # /api/telemetry (the phone GPS collector, e.g. Colota) and captures are
 # stamped with the sample nearest in time. The latest sample is persisted
 # locally so it survives a restart.
-telemetry_store = TelemetryStore(persist_path=str(DATA_DIR / "telemetry_latest.json"))
+telemetry_store = TelemetryStore(
+    persist_path=str(DATA_DIR / "telemetry_latest.json"),
+    max_age_ms=_telemetry_module.phone_gps_max_age_ms(),
+    stale_ms=_telemetry_module.phone_gps_max_age_ms(),
+)
 _srt_watcher: SrtWatcher = None
 
 
@@ -288,6 +313,25 @@ def get_watcher() -> PhotoImportWatcher:
             if _watcher is None:
                 _watcher = PhotoImportWatcher(str(IMPORT_DIR), get_service())
     return _watcher
+
+
+def _live_rtsp_url() -> str:
+    """Current MediaMTX RTSP URL (localhost) for on-demand frame capture."""
+    return network_config.get_network_info().rtsp_url
+
+
+def get_capture_service() -> CaptureService:
+    global _capture_service
+    if _capture_service is None:
+        with _get_lock():
+            if _capture_service is None:
+                _capture_service = CaptureService(
+                    get_service(),
+                    rtsp_url_provider=_live_rtsp_url,
+                    pictures_dir=str(PICTURES_DIR),
+                    tmp_dir=str(IMPORT_TMP_DIR / "capture"),
+                )
+    return _capture_service
 
 
 def get_srt_watcher() -> SrtWatcher:
@@ -405,6 +449,41 @@ def inspections_page():
     return render_template("inspections.html")
 
 
+@app.route("/map", methods=["GET"])
+def map_page():
+    """Offline inspection map (red = crack, green = clear, blue = current drone)."""
+    return render_template("map.html")
+
+
+@app.route("/maps/<int:z>/<int:x>/<int:y>.png", methods=["GET"])
+def map_tile(z, x, y):
+    """
+    Serve a single offline map tile from the local tile store
+    (MAP_TILES_DIR/<z>/<x>/<y>.png). z/x/y are ints (Flask converter), so no
+    path traversal is possible. Missing tiles return 404 - the frontend then
+    shows a clean "Map data unavailable" fallback rather than a blank map.
+    No external tile server is ever contacted (fully offline).
+    """
+    tile = MAP_TILES_DIR / str(z) / str(x) / f"{y}.png"
+    if not tile.is_file():
+        abort(404)
+    return send_file(str(tile), mimetype="image/png")
+
+
+@app.route("/api/map/available", methods=["GET"])
+def api_map_available():
+    """Whether a local offline tile pack is present (drives the map fallback)."""
+    available = False
+    try:
+        for z in MAP_TILES_DIR.iterdir():
+            if z.is_dir() and next(z.rglob("*.png"), None) is not None:
+                available = True
+                break
+    except OSError:
+        available = False
+    return jsonify({"available": available, "tiles_dir": str(MAP_TILES_DIR)})
+
+
 @app.route("/health", methods=["GET"])
 def health():
     try:
@@ -448,6 +527,49 @@ def api_inspect():
             pass
 
     return jsonify(_record_payload(record))
+
+
+# ---------------------------------------------------------------------------
+# Live capture service: the production photo path.
+#
+# The dashboard's "Capture Photo" button calls this. It grabs the CURRENT
+# MediaMTX frame (no VLC, no desktop screenshot, no continuous video decode),
+# saves it as a clean JPEG in the operator's DJI pictures folder, associates
+# the latest usable phone GPS, runs best.pt once, and creates one inspection -
+# all with no manual upload and no separate Analyze step.
+# ---------------------------------------------------------------------------
+@app.route("/api/capture", methods=["POST"])
+def api_capture():
+    """Capture the current live frame -> GPS -> best.pt -> inspection record."""
+    captured_at = request.form.get("captured_at") or request.headers.get("X-Captured-At")
+    try:
+        result = get_capture_service().capture(captured_at=captured_at)
+    except CaptureError as exc:
+        # A temporary stream/network failure is a normal condition, not a
+        # crash: return a clean, human-readable error the UI can show without
+        # exposing a stack trace. MediaMTX and inspection history are untouched.
+        log.warning("[CAPTURE] %s", exc)
+        return jsonify({"ok": False, "error": "capture_failed", "detail": str(exc)}), 503
+    except Exception as exc:  # noqa: BLE001 - last-resort guard; never 500 the whole app
+        log.error("[CAPTURE] unexpected error: %s", exc)
+        return jsonify({"ok": False, "error": "capture_failed", "detail": str(exc)}), 503
+
+    record = result["record"]
+    payload = _record_payload(record)
+    payload["ok"] = True
+    payload["image_path"] = result["image_path"]
+    payload["captured_at"] = result["captured_at"]
+    log.info("[MATANGLAWIN] Capture -> %s (inspection #%s)", record.status, record.id)
+    return jsonify(payload), 201
+
+
+@app.route("/api/capture/status", methods=["GET"])
+def api_capture_status():
+    """Internal capture/stream-health snapshot (debug only; not an operator panel)."""
+    try:
+        return jsonify(get_capture_service().status())
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +694,28 @@ def api_inspections():
     records = db.list_inspections(limit=limit)
     items = [_record_payload(r) for r in records]
     return jsonify({"count": db.count(), "inspections": items})
+
+
+@app.route("/api/inspections/geo", methods=["GET"])
+def api_inspections_geo():
+    """
+    Points for the offline inspection map: geolocated inspections only.
+    Returns a compact point list plus image URLs for the marker popups.
+    This endpoint keeps working even when the live stream is down, so map
+    markers (and their history) survive a video/network drop.
+    """
+    db = get_db()
+    records = db.list_inspections(limit=1000)
+    points = []
+    for r in records:
+        if r.latitude is None or r.longitude is None or not r.gps_available:
+            continue
+        m = r.to_map()
+        if m.get("radius_m") is None:
+            m["radius_m"] = _telemetry_module.phone_gps_radius_m()  # fallback for older rows
+        m["urls"] = _inspection_urls(r)
+        points.append(m)
+    return jsonify({"count": len(points), "points": points})
 
 
 @app.route("/api/inspections/summary", methods=["GET"])

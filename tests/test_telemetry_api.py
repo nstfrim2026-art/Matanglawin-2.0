@@ -153,10 +153,13 @@ def test_manual_upload_never_gets_gps_even_with_active_colota(client):
     assert "Not recorded" in body
 
 
-# -- map removed -----------------------------------------------------
+# -- offline map restored --------------------------------------------
 
-def test_map_routes_are_gone(client):
-    # The map feature (page, tiles, geo API) was removed entirely.
-    assert client.get("/map").status_code == 404
-    assert client.get("/api/inspections/geo").status_code == 404
+def test_map_routes_exist(client):
+    # The offline inspection map is part of the final system (page + geo API).
+    assert client.get("/map").status_code == 200
+    geo = client.get("/api/inspections/geo")
+    assert geo.status_code == 200
+    assert "points" in geo.get_json()
+    # A missing local tile returns a clean 404 (no external tile server).
     assert client.get("/maps/5/10/12.png").status_code == 404

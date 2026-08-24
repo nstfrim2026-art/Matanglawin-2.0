@@ -28,10 +28,19 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-# How close (ms) a telemetry sample must be to the capture time to be trusted.
+# How close (ms) a telemetry sample must be to the capture time to be trusted
+# as an EXACT match (the highest-quality association).
 DEFAULT_MAX_MATCH_MS = 2000.0
-# How old (ms) the newest sample may be before the source is "stale".
-DEFAULT_STALE_MS = 5000.0
+# Maximum age (ms) of the newest valid sample for it to still be usable as a
+# fallback ("latest known position"). Configurable via PHONE_GPS_MAX_AGE_SECONDS.
+# This is the window that decides gps_usable at capture time (requirement:
+# "PHONE_GPS_MAX_AGE_SECONDS=15"): if the freshest fix is <= this old, GPS is
+# usable; older than this, GPS is unavailable (but capture/analysis still run).
+DEFAULT_MAX_AGE_MS = 15000.0
+# How old (ms) the newest sample may be before the source is "stale". Kept in
+# lockstep with the max-age window so the live "current drone position" dot and
+# the capture-association fallback agree on what "fresh" means.
+DEFAULT_STALE_MS = DEFAULT_MAX_AGE_MS
 DEFAULT_BUFFER = 6000  # ~10 min at 10 Hz
 DEFAULT_RADIUS_M = 50.0  # inspection-area radius around the recorded GPS point
 
@@ -48,6 +57,20 @@ def phone_gps_radius_m() -> float:
         return v if v > 0 else DEFAULT_RADIUS_M
     except (TypeError, ValueError):
         return DEFAULT_RADIUS_M
+
+
+def phone_gps_max_age_ms() -> float:
+    """
+    Maximum age (milliseconds) a phone-GPS fix may have and still be attached
+    to a capture, from PHONE_GPS_MAX_AGE_SECONDS (default 15 s). Single source
+    of truth so the staleness window is never hardcoded in multiple files.
+    """
+    import os
+    try:
+        secs = float(os.environ.get("PHONE_GPS_MAX_AGE_SECONDS", DEFAULT_MAX_AGE_MS / 1000.0))
+        return (secs * 1000.0) if secs > 0 else DEFAULT_MAX_AGE_MS
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_AGE_MS
 
 
 def parse_timestamp_ms(value) -> Optional[float]:
@@ -124,11 +147,17 @@ class TelemetryStore:
         max_samples: int = DEFAULT_BUFFER,
         max_match_ms: float = DEFAULT_MAX_MATCH_MS,
         stale_ms: float = DEFAULT_STALE_MS,
+        max_age_ms: float = DEFAULT_MAX_AGE_MS,
         persist_path: Optional[str] = None,
     ):
         self.max_samples = max_samples
         self.max_match_ms = max_match_ms
         self.stale_ms = stale_ms
+        # Fallback window: how old the freshest fix may be and still be used as
+        # a capture's "latest known position" when no sample sits inside the
+        # tight max_match_ms window. This is what makes association robust
+        # instead of requiring near-exact timestamp equality.
+        self.max_age_ms = max_age_ms
         self.persist_path = persist_path
         self._lock = threading.Lock()
         self._times: List[float] = []                 # sorted epoch-ms
@@ -252,17 +281,42 @@ class TelemetryStore:
             sample = samples[best_idx]
         return sample, abs(sample.timestamp_ms - capture_ms)
 
-    def match_for_capture(self, capture_ms: Optional[float] = None) -> dict:
+    def match_for_capture(
+        self,
+        capture_ms: Optional[float] = None,
+        use_stale_fallback: bool = False,
+        max_age_ms: Optional[float] = None,
+    ) -> dict:
         """
-        Association result for a capture: the nearest sample if it is within
-        `max_match_ms`, else no fix. Never raises.
+        Robust association result for a capture. Never raises, never fabricates
+        coordinates, and never defaults to (0,0).
+
+        Association strategy (requirement: "robust association, not exact
+        timestamp matching"):
+
+          1. Take the sample NEAREST in time to ``capture_ms``. If it is within
+             ``max_match_ms`` of the capture time, use it (highest quality,
+             ``gps_match="nearest"``).
+          2. Otherwise, if ``use_stale_fallback`` is set, fall back to the
+             LATEST valid sample as long as it is at/just-before the capture
+             time and no older than ``max_age_ms`` (``gps_match="latest"``).
+             This is the "latest usable phone-GPS position" used by a live
+             capture, so a slightly-out-of-sync clock never yields
+             "Not recorded".
+          3. Otherwise there is genuinely no usable fix -> ``gps_available``
+             is False (the image is still captured and still analyzed).
+
+        The stale fallback is deliberately opt-in: the SRT geotagging backfill
+        keeps strict nearest-only matching (it must not attach a fix that is
+        far from the frame's own timestamp), while the live phone-GPS capture
+        path enables it.
 
         Returns a dict with:
             gps_available, gps_time_delta_ms, latitude, longitude,
-            altitude_m, gps_source, captured_ms
+            altitude_m, gps_source, captured_ms, gps_match
         """
         capture_ms = time.time() * 1000.0 if capture_ms is None else capture_ms
-        sample, delta = self.nearest(capture_ms)
+        max_age = self.max_age_ms if max_age_ms is None else max_age_ms
         out = {
             "gps_available": False,
             "gps_time_delta_ms": None,
@@ -271,7 +325,11 @@ class TelemetryStore:
             "altitude_m": None,
             "gps_source": None,
             "captured_ms": capture_ms,
+            "gps_match": "none",
         }
+
+        # 1) Nearest sample inside the tight match window (best quality).
+        sample, delta = self.nearest(capture_ms)
         if sample is not None and delta is not None and delta <= self.max_match_ms:
             out.update(
                 gps_available=True,
@@ -280,7 +338,28 @@ class TelemetryStore:
                 longitude=sample.longitude,
                 altitude_m=sample.altitude_m,
                 gps_source=sample.source,
+                gps_match="nearest",
             )
+            return out
+
+        # 2) Fallback: latest valid, non-excessively-stale position.
+        if use_stale_fallback:
+            with self._lock:
+                latest = self._latest
+            if latest is not None:
+                age = capture_ms - latest.timestamp_ms
+                # Sample must be at/before the capture (a future sample is not a
+                # "last known position") and within the configured max age.
+                if 0 <= age <= max_age:
+                    out.update(
+                        gps_available=True,
+                        gps_time_delta_ms=round(age, 1),
+                        latitude=latest.latitude,
+                        longitude=latest.longitude,
+                        altitude_m=latest.altitude_m,
+                        gps_source=latest.source,
+                        gps_match="latest",
+                    )
         return out
 
     def stats(self) -> dict:
