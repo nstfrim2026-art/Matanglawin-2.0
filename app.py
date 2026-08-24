@@ -88,7 +88,12 @@ from detector import (
     DEFAULT_TILED,
     DEFAULT_UNSHARP,
 )
-from capture_service import CaptureService, CaptureError, default_pictures_dir
+from capture_service import (
+    CaptureService,
+    CaptureError,
+    FfmpegNotConfiguredError,
+    default_pictures_dir,
+)
 from import_ledger import ImportLedger, hash_bytes
 import telemetry_store as _telemetry_module
 from telemetry_store import TelemetryStore
@@ -144,18 +149,6 @@ def _configured_dirs(env_name: str, default: str = "") -> list:
 #   set MATANGLAWIN_SRT_DIR=%USERPROFILE%\Videos\DJI
 SRT_DIRS = _configured_dirs("MATANGLAWIN_SRT_DIR", str(DATA_DIR / "srt")) + \
     _configured_dirs("MATANGLAWIN_CAPTURE_DIR", "")
-
-# Local offline map tiles served at /maps/<z>/<x>/<y>.png. Configurable so the
-# tile dataset can be swapped without touching the frontend. Default is
-# static/maps (the operator drops a real offline tile pack there - see README;
-# no tiles are fabricated). Override with MATANGLAWIN_MAP_TILES_DIR.
-MAP_TILES_DIR = Path(
-    os.environ.get("MATANGLAWIN_MAP_TILES_DIR", str(RESOURCE_DIR / "static" / "maps"))
-)
-try:
-    MAP_TILES_DIR.mkdir(parents=True, exist_ok=True)
-except OSError:
-    pass  # read-only (e.g. bundled) - operator sets MATANGLAWIN_MAP_TILES_DIR
 
 # Where photos captured from the live MediaMTX stream are written. Default is
 # the DJI-style pictures folder in the user's profile; override with
@@ -297,11 +290,9 @@ def get_service() -> InspectionService:
     if _service is None:
         with _get_lock():
             if _service is None:
-                import telemetry_store as _ts
                 _service = InspectionService(
                     get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS,
-                    telemetry_store=telemetry_store,
-                    radius_m=_ts.phone_gps_radius_m(), **detector_config()
+                    telemetry_store=telemetry_store, **detector_config()
                 )
     return _service
 
@@ -449,41 +440,6 @@ def inspections_page():
     return render_template("inspections.html")
 
 
-@app.route("/map", methods=["GET"])
-def map_page():
-    """Offline inspection map (red = crack, green = clear, blue = current drone)."""
-    return render_template("map.html")
-
-
-@app.route("/maps/<int:z>/<int:x>/<int:y>.png", methods=["GET"])
-def map_tile(z, x, y):
-    """
-    Serve a single offline map tile from the local tile store
-    (MAP_TILES_DIR/<z>/<x>/<y>.png). z/x/y are ints (Flask converter), so no
-    path traversal is possible. Missing tiles return 404 - the frontend then
-    shows a clean "Map data unavailable" fallback rather than a blank map.
-    No external tile server is ever contacted (fully offline).
-    """
-    tile = MAP_TILES_DIR / str(z) / str(x) / f"{y}.png"
-    if not tile.is_file():
-        abort(404)
-    return send_file(str(tile), mimetype="image/png")
-
-
-@app.route("/api/map/available", methods=["GET"])
-def api_map_available():
-    """Whether a local offline tile pack is present (drives the map fallback)."""
-    available = False
-    try:
-        for z in MAP_TILES_DIR.iterdir():
-            if z.is_dir() and next(z.rglob("*.png"), None) is not None:
-                available = True
-                break
-    except OSError:
-        available = False
-    return jsonify({"available": available, "tiles_dir": str(MAP_TILES_DIR)})
-
-
 @app.route("/health", methods=["GET"])
 def health():
     try:
@@ -544,6 +500,12 @@ def api_capture():
     captured_at = request.form.get("captured_at") or request.headers.get("X-Captured-At")
     try:
         result = get_capture_service().capture(captured_at=captured_at)
+    except FfmpegNotConfiguredError as exc:
+        # A configuration problem (no usable ffmpeg) - reported distinctly from
+        # a transient stream failure so the operator knows to install/point at
+        # ffmpeg rather than chase the network.
+        log.warning("[CAPTURE] %s", exc)
+        return jsonify({"ok": False, "error": "ffmpeg_not_configured", "detail": str(exc)}), 503
     except CaptureError as exc:
         # A temporary stream/network failure is a normal condition, not a
         # crash: return a clean, human-readable error the UI can show without
@@ -694,28 +656,6 @@ def api_inspections():
     records = db.list_inspections(limit=limit)
     items = [_record_payload(r) for r in records]
     return jsonify({"count": db.count(), "inspections": items})
-
-
-@app.route("/api/inspections/geo", methods=["GET"])
-def api_inspections_geo():
-    """
-    Points for the offline inspection map: geolocated inspections only.
-    Returns a compact point list plus image URLs for the marker popups.
-    This endpoint keeps working even when the live stream is down, so map
-    markers (and their history) survive a video/network drop.
-    """
-    db = get_db()
-    records = db.list_inspections(limit=1000)
-    points = []
-    for r in records:
-        if r.latitude is None or r.longitude is None or not r.gps_available:
-            continue
-        m = r.to_map()
-        if m.get("radius_m") is None:
-            m["radius_m"] = _telemetry_module.phone_gps_radius_m()  # fallback for older rows
-        m["urls"] = _inspection_urls(r)
-        points.append(m)
-    return jsonify({"count": len(points), "points": points})
 
 
 @app.route("/api/inspections/summary", methods=["GET"])

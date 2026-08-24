@@ -1,28 +1,27 @@
 /**
- * dashboard.js - Drives the clean, display-only Live Inspection Dashboard.
+ * dashboard.js - Drives the Live Inspection Dashboard.
  *
- * The dashboard has exactly three concerns:
+ * Layout (matches the reference): the clean live drone POV on top, the
+ * Capture Photo button directly under the video, and the Latest Inspection
+ * section beneath it.
  *
  *   1. Live Drone POV (display only) - the raw MediaMTX WebRTC feed in an
  *      <iframe>. The backend never proxies, re-encodes, or annotates it, and
- *      NO detection ever runs on it (no masks/boxes/labels/confidence). A
- *      LIVE/OFFLINE badge is derived purely from MediaMTX's own publisher
- *      state (/api/stream/status), never from reading frames.
+ *      NO detection ever runs on it (no masks/boxes/labels/confidence). The
+ *      LIVE / "No connection" state comes from MediaMTX's own publisher state
+ *      (/api/stream/status), never from reading frames.
  *
- *   2. Capture Photo - POSTs /api/capture. The capture service grabs the
- *      current MediaMTX frame, saves a JPEG, associates the latest usable
- *      phone GPS, runs best.pt once, and creates one inspection. No manual
- *      upload, no Snipping Tool, no separate Analyze step.
+ *   2. Capture Photo - POSTs /api/capture. One press = one capture = one
+ *      inspection. Double-clicks / simultaneous requests are prevented.
  *
- *   3. Automatic crack alert - a short beep + visible banner that fires ONCE
- *      per newly created crack inspection (never on refresh, never for a
- *      clear result). Inspection counts, history, results, and the map live
- *      in the Inspection section, not here.
+ *   3. Latest Inspection - status + latitude/longitude/date-time/source +
+ *      analyzed image, refreshed automatically after each capture. A crack
+ *      beeps + alerts ONCE per new inspection (never on refresh/polling,
+ *      never for a clear result).
  *
- * Connection failures are treated as NORMAL: the live area falls back to a
- * clean "No connection" and reconnects automatically with a bounded backoff.
- * A dropped stream never crashes the page and never touches inspection/GPS/
- * map history (those are served by independent endpoints).
+ * Connection failures are NORMAL: the live area falls back to a clean
+ * "No connection" and reconnects automatically with a bounded backoff. A
+ * dropped stream never reloads the page and never touches inspection history.
  */
 
 const REFRESH_INTERVAL_MS = 3000;
@@ -34,6 +33,11 @@ function setText(id, text) {
   const el = document.getElementById(id);
   if (el) el.textContent = text;
 }
+
+// Coordinate + timestamp formatting.
+function fmtLat(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'N' : 'S'); }
+function fmtLon(v) { return Math.abs(v).toFixed(6) + '\u00B0 ' + (v >= 0 ? 'E' : 'W'); }
+function fmtDateTime(ts) { return ts ? String(ts).replace('T', ' ').slice(0, 16) : '\u2014'; }
 
 // ---------------------------------------------------------------- network
 async function refreshWebrtcUrl() {
@@ -89,9 +93,8 @@ function showCrackAlert(rec) {
 }
 
 // ----------------------------------------------- live POV + reconnection
-// Internal stream-health monitoring (requirement 4C): last successful frame
-// time, current status, reconnect attempts, last error. Kept for debugging;
-// the operator only ever sees a clean LIVE / "No connection" state.
+// Internal stream-health monitoring (kept for debugging; the operator only
+// ever sees a clean LIVE / "No connection" state).
 const streamHealth = {
   status: 'UNKNOWN',
   lastFrameTs: null,
@@ -134,8 +137,8 @@ function setPovLive() {
 }
 
 // Bounded exponential backoff: when disconnected we keep retrying the status
-// probe, but never hammer the network. The steady poll also calls this, so a
-// stream that comes back is picked up automatically.
+// probe, but never hammer the network or reload the page. The steady poll also
+// calls this, so a stream that comes back is picked up automatically.
 function scheduleReconnect() {
   if (reconnectTimer) return;
   const delay = Math.min(
@@ -165,15 +168,12 @@ async function refreshPovStatus() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     setPovLive();
   } else {
-    // OFFLINE / UNKNOWN (or LIVE but URL not resolved yet): clean placeholder
-    // and keep trying to reconnect on a bounded backoff.
     setPovOffline(state === 'UNKNOWN' ? 'CONNECTING' : 'OFFLINE');
     scheduleReconnect();
   }
 }
 
-// A live player that fails to load must not leave a broken frame: fall back to
-// the clean placeholder and let the reconnect loop bring it back.
+// A live player that fails to load must not leave a broken frame.
 (function wireIframeError() {
   const iframe = document.getElementById('pov-iframe');
   if (iframe) {
@@ -186,7 +186,23 @@ async function refreshPovStatus() {
 })();
 
 // ---------------------------------------------------------- Capture Photo
+// Button states: idle -> loading -> success/error -> (back to idle).
 let capturing = false;
+let captureResetTimer = null;
+
+function setButtonState(state, labelText) {
+  const btn = document.getElementById('capture-btn');
+  const label = document.getElementById('capture-label');
+  if (!btn) return;
+  btn.classList.remove('is-idle', 'is-loading', 'is-success', 'is-error');
+  btn.classList.add('is-' + state);
+  btn.disabled = (state === 'loading');
+  const icons = { idle: '\uD83D\uDCF7', loading: '\u23F3', success: '\u2713', error: '\u26A0' };
+  const icon = btn.querySelector('.capture-icon');
+  if (icon) icon.textContent = icons[state] || icons.idle;
+  if (label) label.textContent = labelText;
+}
+
 function setCaptureStatus(text, kind) {
   const el = document.getElementById('capture-status');
   if (!el) return;
@@ -194,46 +210,84 @@ function setCaptureStatus(text, kind) {
   el.className = 'capture-status' + (kind ? ' capture-status-' + kind : '');
 }
 
+function resetButtonSoon() {
+  if (captureResetTimer) clearTimeout(captureResetTimer);
+  captureResetTimer = setTimeout(() => setButtonState('idle', 'Capture Photo'), 2500);
+}
+
 async function onCapture() {
+  // Prevent double-clicks / multiple simultaneous capture requests: one press
+  // must equal exactly one capture and one inspection.
   if (capturing) return;
   capturing = true;
-  const btn = document.getElementById('capture-btn');
-  if (btn) btn.disabled = true;
+  if (captureResetTimer) clearTimeout(captureResetTimer);
   _unlockAudio();  // first user gesture -> allow the alert beep to play
-  setCaptureStatus('Capturing\u2026', 'busy');
+  setButtonState('loading', 'Capturing\u2026');
+  setCaptureStatus('', null);
   try {
     const res = await fetch('/api/capture', { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      // Clean, human-readable error - never a stack trace. The website,
-      // server, MediaMTX, and inspection history are all unaffected.
       const detail = data.detail || 'Live feed unavailable';
-      setCaptureStatus('Capture failed: ' + detail, 'error');
+      setButtonState('error', 'Capture Failed');
+      setCaptureStatus(detail, 'error');
+      resetButtonSoon();
     } else {
+      setButtonState('success', 'Photo Captured');
       const link = '<a href="/inspection/' + data.id + '">#' + data.id + '</a>';
-      setCaptureStatus('', null);
       const el = document.getElementById('capture-status');
       if (el) {
         el.className = 'capture-status ' + (data.has_crack ? 'capture-status-crack' : 'capture-status-ok');
-        el.innerHTML = data.status + ' \u2014 inspection ' + link +
-          ' \u00B7 <a href="/inspections">view in Inspections</a>';
+        el.innerHTML = data.status + ' \u2014 inspection ' + link;
       }
-      // Refresh the latest poll immediately so the crack alert/beep fires now.
-      refreshLatestForAlert();
+      // Update the Latest Inspection section + fire the alert immediately.
+      refreshLatest();
+      resetButtonSoon();
     }
   } catch (err) {
-    setCaptureStatus('Capture failed: network error', 'error');
+    setButtonState('error', 'Capture Failed');
+    setCaptureStatus('Network error', 'error');
+    resetButtonSoon();
   } finally {
     capturing = false;
-    if (btn) btn.disabled = false;
   }
 }
 
-// -------------------------------------------- crack alert (latest poll)
-// We poll the latest inspection ONLY to drive the once-per-new-crack alert.
-// The full result / counts / history live in the Inspection section.
-function handleLatestForAlert(rec) {
-  if (!rec) return;
+// -------------------------------------------- Latest Inspection + alert
+function renderLatest(rec) {
+  const empty = document.getElementById('latest-empty');
+  const content = document.getElementById('latest-content');
+  if (!rec) {
+    if (empty) empty.style.display = 'block';
+    if (content) content.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  if (content) content.style.display = 'grid';
+
+  const banner = document.getElementById('latest-status');
+  if (banner) {
+    banner.textContent = rec.has_crack ? 'CRACK DETECTED' : 'CLEAR';
+    banner.className = 'status-banner ' + (rec.has_crack ? 'status-crack' : 'status-ok');
+  }
+
+  const hasGps = rec.gps_available && rec.latitude != null && rec.longitude != null;
+  setText('latest-lat', hasGps ? fmtLat(rec.latitude) : 'Not recorded');
+  setText('latest-lon', hasGps ? fmtLon(rec.longitude) : 'Not recorded');
+  setText('latest-datetime', fmtDateTime(rec.timestamp));
+  setText('latest-source', rec.source_label || 'Capture');
+
+  const urls = rec.urls || {};
+  const img = document.getElementById('latest-result');
+  const src = (rec.has_crack && urls.highlighted) ? urls.highlighted : urls.original;
+  if (img && src) img.src = src + '?v=' + rec.id;   // cache-bust per inspection
+  setText('latest-caption', rec.has_crack ? 'Analyzed photo (crack highlighted)' : 'Analyzed photo');
+
+  const view = document.getElementById('latest-view');
+  if (view) view.href = '/inspection/' + rec.id;
+
+  // Fire the beep + visible alert ONCE per new inspection id (never on a
+  // refresh of the same result, never for a clear result).
   if (rec.id !== lastInspectionId) {
     if (seenAnyInspection && lastInspectionId !== null && rec.has_crack) {
       beep();
@@ -244,12 +298,12 @@ function handleLatestForAlert(rec) {
   }
 }
 
-async function refreshLatestForAlert() {
+async function refreshLatest() {
   try {
     const res = await fetch('/api/inspection/latest');
-    handleLatestForAlert(await res.json());
+    renderLatest(await res.json());
   } catch (err) {
-    /* offline-safe */
+    /* offline-safe: leave the last known result on screen */
   }
 }
 
@@ -257,12 +311,13 @@ async function refreshLatestForAlert() {
 function refreshAll() {
   refreshWebrtcUrl();
   refreshPovStatus();
-  refreshLatestForAlert();
+  refreshLatest();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('capture-btn');
   if (btn) btn.addEventListener('click', onCapture);
+  setButtonState('idle', 'Capture Photo');
 });
 
 refreshAll();

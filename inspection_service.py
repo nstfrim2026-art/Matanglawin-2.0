@@ -86,13 +86,8 @@ class InspectionService:
         min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
         refine: bool = inference_core.DEFAULT_REFINE,
         telemetry_store=None,
-        radius_m: float = 50.0,
     ):
         self.db = db
-        # Inspection-area radius (metres) stored with each geotagged
-        # inspection - the operator marker represents this area around the
-        # recorded GPS location. Configurable via PHONE_GPS_RADIUS_METERS.
-        self.radius_m = radius_m
         # Optional aircraft-telemetry store (telemetry_store.TelemetryStore).
         # When present, each inspection is stamped with the aircraft GPS
         # sample nearest to the capture time. Absent -> no geotag, and
@@ -275,7 +270,6 @@ class InspectionService:
                 gps_time_delta_ms=gps["gps_time_delta_ms"],
                 gps_source=gps["gps_source"],
                 captured_at=captured_iso,
-                radius_m=self.radius_m if gps["gps_available"] else None,
                 capture_id=capture_id,
             )
         except sqlite3.IntegrityError:

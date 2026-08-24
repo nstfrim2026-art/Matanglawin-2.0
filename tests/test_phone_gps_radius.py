@@ -94,15 +94,13 @@ def test_telemetry_rejects_out_of_range(client):
     assert client.post("/api/telemetry", json={"lat": 0, "lon": 0, "tst": 1704067200}).status_code == 400
 
 
-# -- configurable radius on capture ---------------------------------
+# -- GPS association on capture (no radius) -------------------------
 
-def test_automatic_capture_with_gps_surfaces_coords_and_stores_radius(client, monkeypatch):
+def test_automatic_capture_with_gps_surfaces_coords(client):
     import app as appmod
-    monkeypatch.setenv("PHONE_GPS_RADIUS_METERS", "100")
-    monkeypatch.setattr(appmod, "_service", None)  # rebuild service with new radius
     stubs.stub_one_crack(inference_core)
     client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321, "timestamp": _TS})
-    # AUTOMATIC capture (DJI import) is the path that receives GPS.
+    # AUTOMATIC capture (DJI import) is a path that receives GPS.
     j = client.post("/api/import", data=stubs.jpg_bytes(value=201),
                     content_type="image/jpeg",
                     headers={"X-Filename": "DJI_1.jpg", "X-Captured-At": _TS}).get_json()
@@ -110,15 +108,13 @@ def test_automatic_capture_with_gps_surfaces_coords_and_stores_radius(client, mo
     # capture coordinates are surfaced in the inspection details
     assert j["gps_available"] is True
     assert abs(j["latitude"] - 7.123456) < 1e-6 and abs(j["longitude"] - 125.654321) < 1e-6
-    # radius is stored on the record (metadata) while accuracy/altitude are never exposed
+    # radius/accuracy/altitude are never exposed (radius removed entirely)
     assert "radius_m" not in j and "accuracy" not in j and "altitude_m" not in j
     rec = appmod.get_db().get_inspection(j["id"])
-    assert rec.radius_m == 100
     assert rec.altitude_m is None
 
 
-def test_automatic_capture_without_gps_has_no_coords_and_no_radius(client):
-    import app as appmod
+def test_automatic_capture_without_gps_has_no_coords(client):
     stubs.stub_no_crack(inference_core)
     j = client.post("/api/import", data=stubs.jpg_bytes(value=202),
                     content_type="image/jpeg",
@@ -126,8 +122,6 @@ def test_automatic_capture_without_gps_has_no_coords_and_no_radius(client):
     assert j["status"] == "NO CRACK DETECTED"       # analysis still runs
     assert j["gps_available"] is False
     assert j["latitude"] is None and j["longitude"] is None
-    rec = appmod.get_db().get_inspection(j["id"])
-    assert rec.radius_m is None
 
 
 # -- dashboard cleanup + crack alert --------------------------------
@@ -146,15 +140,13 @@ def test_dashboard_js_has_beep_and_alert():
     assert "showCrackAlert" in js
 
 
-# -- radius config + persistence (unit) -----------------------------
-
-def test_phone_gps_radius_env(monkeypatch):
-    monkeypatch.delenv("PHONE_GPS_RADIUS_METERS", raising=False)
-    assert ts.phone_gps_radius_m() == 50.0
-    monkeypatch.setenv("PHONE_GPS_RADIUS_METERS", "200")
-    assert ts.phone_gps_radius_m() == 200.0
-    monkeypatch.setenv("PHONE_GPS_RADIUS_METERS", "bad")
-    assert ts.phone_gps_radius_m() == 50.0
+def test_radius_is_removed_entirely():
+    # No radius API/config/storage anywhere.
+    assert not hasattr(ts, "phone_gps_radius_m")
+    from inspection_db import InspectionRecord
+    rec = InspectionRecord(id=1, timestamp="t", status="NO CRACK DETECTED", source="capture")
+    assert not hasattr(rec, "radius_m")
+    assert "radius_m" not in rec.to_dict()
 
 
 def test_latest_sample_persists_across_restart(tmp_path):

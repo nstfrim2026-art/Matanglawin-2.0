@@ -42,21 +42,6 @@ DEFAULT_MAX_AGE_MS = 15000.0
 # the capture-association fallback agree on what "fresh" means.
 DEFAULT_STALE_MS = DEFAULT_MAX_AGE_MS
 DEFAULT_BUFFER = 6000  # ~10 min at 10 Hz
-DEFAULT_RADIUS_M = 50.0  # inspection-area radius around the recorded GPS point
-
-
-def phone_gps_radius_m() -> float:
-    """
-    Inspection-area radius (metres) from PHONE_GPS_RADIUS_METERS (e.g. 25 /
-    50 / 100 / 200), default 50. Single source of truth so the value is not
-    hardcoded in multiple files.
-    """
-    import os
-    try:
-        v = float(os.environ.get("PHONE_GPS_RADIUS_METERS", DEFAULT_RADIUS_M))
-        return v if v > 0 else DEFAULT_RADIUS_M
-    except (TypeError, ValueError):
-        return DEFAULT_RADIUS_M
 
 
 def phone_gps_max_age_ms() -> float:

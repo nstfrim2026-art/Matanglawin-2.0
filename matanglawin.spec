@@ -22,8 +22,6 @@ datas = [
     (str(ROOT / "static" / "style.css"), "static"),
     (str(ROOT / "static" / "dashboard.js"), "static"),
     (str(ROOT / "static" / "img"), "static/img"),
-    # Vendored offline Leaflet assets for the inspection map (no CDN/internet).
-    (str(ROOT / "static" / "vendor"), "static/vendor"),
     (str(ROOT / "best.pt"), "."),
 ]
 # All runtime data (uploaded/imported photos, inspection results, the

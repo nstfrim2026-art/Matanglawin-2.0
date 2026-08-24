@@ -35,10 +35,44 @@
     </div>
 
     <div class="capture-bar">
-      <button type="button" id="capture-btn" class="btn-primary capture-btn">
-        <span class="capture-icon">&#128247;</span> Capture Photo
+      <button type="button" id="capture-btn" class="capture-btn is-idle">
+        <span class="capture-icon" aria-hidden="true">&#128247;</span>
+        <span class="capture-label" id="capture-label">Capture Photo</span>
       </button>
       <span id="capture-status" class="capture-status" role="status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <!-- ============ Latest Inspection (updates after each capture) ============ -->
+  <section class="panel latest-panel">
+    <div class="panel-head">
+      <h2>Latest Inspection</h2>
+      <span id="latest-live-note" class="auto-note">Updating automatically&hellip;</span>
+    </div>
+
+    <div id="latest-empty" class="empty-state">
+      <p>No inspection yet.</p>
+      <p class="hint">Aim the drone and press <strong>Capture Photo</strong> above.</p>
+    </div>
+
+    <div id="latest-content" class="latest-layout" style="display:none;">
+      <div class="latest-status-col">
+        <div class="status-banner" id="latest-status">&mdash;</div>
+        <dl class="readout">
+          <div><dt>Latitude</dt><dd id="latest-lat">&mdash;</dd></div>
+          <div><dt>Longitude</dt><dd id="latest-lon">&mdash;</dd></div>
+          <div><dt>Date / Time</dt><dd id="latest-datetime">&mdash;</dd></div>
+          <div><dt>Source</dt><dd id="latest-source">&mdash;</dd></div>
+        </dl>
+        <a id="latest-view" class="btn-secondary" href="#">Open full result</a>
+      </div>
+
+      <div class="latest-images single">
+        <figure class="shot">
+          <figcaption id="latest-caption">Analyzed photo</figcaption>
+          <img id="latest-result" class="shot-img" alt="Analyzed inspection photo">
+        </figure>
+      </div>
     </div>
   </section>
 {% endblock %}

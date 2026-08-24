@@ -28,7 +28,7 @@ Pipeline B — STILL PHOTO INSPECTION (automatic, on Capture Photo)
     → current frame → clean JPEG (saved to the DJI pictures folder)
     → latest usable phone GPS → best.pt / YOLO segmentation
     → CRACK DETECTED / NO CRACK DETECTED + original + red-highlighted
-    → automatic inspection record → map marker → inspection history
+    → automatic inspection record → Latest Inspection + history
 
     (The DJI photo-transfer bridge — POST /api/import / watch folder —
      remains available as an alternate transport; both converge on the
@@ -50,31 +50,45 @@ The operator workflow is deliberately minimal:
 ```
 1. Start the system.                5. Press Capture Photo.
 2. Start the DJI live feed.         6. Wait for capture + analysis + GPS.
-3. Fly the drone.                   7. Review the Inspection section.
-4. Aim at the structure.            8. Click a map marker for details.
+3. Fly the drone.                   7. The Latest Inspection updates below.
+4. Aim at the structure.            8. Full history in the Inspection section.
 ```
 
 `POST /api/capture` (the **Capture Photo** button):
 
-1. Resolves the current MediaMTX RTSP URL (localhost; the LAN IP is never
-   hardcoded — see *Dynamic IP*).
-2. Grabs **one current frame** with `ffmpeg` — a single snapshot, not a
-   continuous video decode and not any YOLO-on-video pipeline. It never
-   screenshots the Windows desktop or the browser; it is the clean drone
-   frame MediaMTX is serving. (Set `MATANGLAWIN_FFMPEG` if `ffmpeg` is not
-   on `PATH`.)
+1. Resolves the current MediaMTX RTSP URL (`rtsp://127.0.0.1:8554/<stream>`;
+   the LAN IP is never hardcoded — see *Dynamic IP*).
+1b. Locates ffmpeg robustly: `MATANGLAWIN_FFMPEG` → `ffmpeg` on `PATH` →
+   sensible Windows locations (WinGet/Program Files, discovered by globbing —
+   no hardcoded username/path). If none is found, `/api/capture` returns a
+   clear **`FFmpeg not configured`** error (never a generic stream failure and
+   never a crash).
+2. Grabs **one current frame** over RTSP (TCP transport) with `ffmpeg` — a
+   single snapshot, not a continuous video decode and not any YOLO-on-video
+   pipeline. It never screenshots the Windows desktop or the browser; it is
+   the clean drone frame MediaMTX is serving. **VLC is not involved.**
 3. Saves the JPEG into the operator's DJI pictures folder
    (`%USERPROFILE%\Pictures\DJI\MatanglaWIN` by default; override with
    `MATANGLAWIN_PICTURES_DIR`).
 4. Associates the latest usable phone GPS (see *Phone GPS*), runs `best.pt`
-   once, and creates exactly one inspection record.
-5. Returns the saved image path, capture timestamp, and the inspection.
+   once, and creates exactly one inspection record. The capture timestamp is
+   **UTC/timezone-aware** (e.g. `...+00:00`) so it is directly comparable to
+   Colota's UTC timestamps — no naive-local skew, which was the cause of the
+   UTC+8 "Not recorded" bug.
+5. Returns the saved image path, capture timestamp, and the inspection, which
+   appears immediately in the **Latest Inspection** section.
+
+The **Capture Photo** button is the single production action: it shows
+`Capturing… → ✓ Photo Captured` (or `⚠ Capture Failed`), and double-clicks /
+simultaneous requests are blocked so **one press = one JPEG = one inspection**.
 
 A temporary stream/network failure is treated as a **normal condition**:
 the grab is retried with a short bounded backoff, and if it still fails a
 clean JSON error (`HTTP 503`) is returned and shown as *"Live feed
 unavailable"*. MediaMTX is never started, stopped, or killed by the app, so
-the website, server, GPS, and inspection history are all unaffected.
+the website, server, GPS, and inspection history are all unaffected. An
+internal diagnostic (`GET /api/capture/status`) reports ffmpeg availability,
+the resolved executable, and the RTSP URL (kept out of the operator UI).
 
 ---
 
@@ -105,9 +119,9 @@ height in the header). No other logo is generated or substituted.
    Then start it with `mediamtx mediamtx.yml`. The config is generated from
    the current network settings, so it always matches your ports/stream key.
 
-2. **Point DJI Fly at this PC.** Open the dashboard — the *Live Feed
-   Connection* panel shows the exact values to enter in DJI Fly's
-   live-stream (RTMP) setting:
+2. **Point DJI Fly at this PC.** Enter these in DJI Fly's live-stream (RTMP)
+   setting (values come from `GET /api/network`, or download a ready
+   `mediamtx.yml` from `/api/mediamtx/config`):
 
    - **DJI RTMP address**, e.g. `rtmp://<your-PC-IP>:1935`
    - **Stream key**, e.g. `matanglawin`
@@ -120,11 +134,15 @@ height in the header). No other logo is generated or substituted.
 
 ---
 
-## Automatic DJI photo inspection (Pipeline B)
+## DJI photo-transfer bridge (alternate transport)
 
-When the operator presses the shutter, the DJI Neo 2 saves the original
-still. MatanglaWIN then receives and analyzes that **exact original JPEG**
-automatically — no browse/select/drag/Upload/Analyze step, ever.
+> **The primary production path is the Capture Photo button (`/api/capture`),
+> described above.** This DJI photo-transfer bridge is kept as an *alternate*
+> transport for workflows that prefer the drone's own still: when the operator
+> presses the DJI shutter, the Neo 2 saves the original and MatanglaWIN
+> receives and analyzes that **exact original JPEG** automatically. Both paths
+> converge on the one central InspectionService and are de-duplicated, so a
+> photo is never analyzed — or shown — twice.
 
 ### Honest note on what DJI provides
 
@@ -388,14 +406,39 @@ the app routes.
 
 ## Real DJI Neo 2 hardware test
 
-Prove that pressing PHOTO makes the actual original arrive and appear in
-MatanglaWIN with **no manual upload**.
+### Primary: the Capture Photo workflow (production)
 
-1. Start MediaMTX (for the live POV) and `python app.py`. Note the PC's LAN
-   IP from the dashboard's *Live Feed Connection* panel.
+Prove a single **Capture Photo** press produces one geotagged inspection —
+no Snipping Tool, no VLC, no manual upload, no manual Analyze, no map.
+
+1. Start MediaMTX, then `python app.py`. Ensure `ffmpeg` is resolvable
+   (`GET /api/capture/status` → `ffmpeg_available: true`; otherwise set
+   `MATANGLAWIN_FFMPEG`).
+2. Start Colota on the phone → `http://<PC-LAN-IP>:5000/api/telemetry`.
+3. In DJI Fly, configure the live-stream (RTMP) values from `GET /api/network`
+   and start the live feed. The dashboard shows a clean **LIVE** POV.
+4. Aim at a known crack and press **Capture Photo**. The button shows
+   `Capturing… → ✓ Photo Captured`.
+5. Confirm, hands-off: a JPEG is saved under
+   `%USERPROFILE%\Pictures\DJI\MatanglaWIN`, `best.pt` runs once, and the
+   **Latest Inspection** updates with the status, latitude/longitude (from
+   Colota), date/time, `Source: Capture`, and the analyzed image.
+6. If a crack is found: one **beep** + a **CRACK DETECTED** alert (once — a
+   page refresh does not beep again). No duplicate record, no map, no radius.
+7. Verify GPS is recorded consistently (not "Not recorded") while Colota is
+   flowing, and that a temporary stream drop shows **"No connection"** and
+   auto-reconnects without losing inspection history.
+
+### Alternate: the DJI photo-transfer bridge
+
+Prove that pressing the DJI PHOTO shutter makes the actual original arrive and
+appear in MatanglaWIN with **no manual upload**.
+
+1. Start MediaMTX (for the live POV) and `python app.py`. Read the PC's LAN
+   IP from `GET /api/network`.
 2. In DJI Fly, enable saving the full-resolution **original** photo to the
-   phone album, and configure the live-stream (RTMP) values shown on the
-   dashboard.
+   phone album, and configure the live-stream (RTMP) values from
+   `GET /api/network`.
 3. Start the bridge:
    - Companion uploader: `python dji_photo_bridge.py --server http://<PC-LAN-IP>:5000 --watch-dir "<DJI album>"` (Termux on the phone, or on the PC watching a synced folder), **or**
    - Folder sync: point Syncthing/cloud at `MATANGLAWIN_IMPORT_DIR`.
@@ -431,13 +474,14 @@ check confirms the exact original bytes reach the analysis input.
 
 ---
 
-## Offline aircraft-GPS geotagging & inspection map
+## Offline aircraft-GPS geotagging (SRT)
 
-Tags each inspection with the **aircraft's** GPS position (nearest in time to
-the capture) and shows inspections on an **offline** map. Fully LAN-only — no
-cloud, no Google Maps, no DJI SDK. It is additive: the live POV, crack
-analysis, and operator result screen are unchanged, and analysis is **never
-blocked** when GPS is missing.
+Optionally tags each inspection with the **aircraft's** GPS position (nearest
+in time to the capture) from DJI SRT. Fully LAN-only — no cloud, no Google
+Maps, no DJI SDK. It is additive: the live POV, crack analysis, and operator
+result screen are unchanged, and analysis is **never blocked** when GPS is
+missing. There is **no map** — the location is shown as plain
+latitude/longitude in the inspection details.
 
 ### Authoritative source: DJI SRT (Video Subtitles) — parses fully offline
 
@@ -461,9 +505,6 @@ command, no upload.
 - Config: `MATANGLAWIN_SRT_DIR` (e.g. `%USERPROFILE%\Videos\DJI`),
   `MATANGLAWIN_CAPTURE_DIR`, optional `MATANGLAWIN_SRT_TZ_OFFSET_MIN` for naive
   SRT timestamps. Design: `.kiro/specs/dji-gps-geotagging/design-srt.md`.
-
-The map shows **red = CRACK / green = NO CRACK / blue = current drone** (blue
-only while a fresh sample exists; it hides when telemetry goes stale).
 
 ### Also supported: generic telemetry ingest (external GPS / CSV)
 
@@ -505,7 +546,7 @@ telemetry source (CSV/GPS)         PC (MatanglaWIN)
 Delivered mode: **POST-FLIGHT / SOURCE-AGNOSTIC TELEMETRY (offline)** — not
 live FlightRecord telemetry, which is not possible offline for the Neo 2.
 
-## Phone GPS (inspection location) + radius + crack alerts
+## Phone GPS (inspection location) + crack alerts
 
 The offline location source is the **phone's GPS**. An Android GPS sender
 (e.g. **Colota**) POSTs `{lat, lon, timestamp}` to `POST /api/telemetry` over
@@ -538,25 +579,21 @@ exactly. Coordinates are never fabricated and never default to `0,0`.
   **image capture still succeeds, crack analysis still runs, and the inspection
   is still created** — only the location field becomes unavailable.
 - **No GPS:** if no usable sample exists, the capture still analyzes — its GPS
-  location just reads **Not recorded**.
-- **Radius:** `PHONE_GPS_RADIUS_METERS` (default `50`; e.g. `25`/`50`/`100`/
-  `200`) is stored per inspection and drawn as the marker's area circle on the
-  offline map. GPS accuracy is never displayed.
-- **Offline map:** `/map` shows every geolocated inspection — 🔴 crack, 🟢
-  clear, plus the current drone position when a fresh fix exists. Clicking a
-  marker opens the inspection (result image, timestamp, location, radius). No
-  internet required; local tiles are served from `MATANGLAWIN_MAP_TILES_DIR`.
+  location just reads **Not recorded**. GPS never blocks the inspection.
+- **No map / no radius:** the location is shown only as latitude/longitude in
+  the Latest Inspection and inspection details. There is no map, no radius, and
+  no radius circle, and GPS accuracy is never stored or displayed.
 - **Crack alert:** when a new inspection detects a crack, the dashboard plays
   one short offline **beep** (WebAudio, no file) and shows a prominent
   auto-hiding **CRACK DETECTED** notice — once per new inspection, never on a
   refresh, never when there's no crack, and never overlaid on the live feed.
 
-Everything is offline / LAN-only. The **Live Dashboard** stays clean (live POV
-+ Capture Photo + a basic connection state); inspection **counts, history,
-results, and the map live in the Inspection section**. If the live stream
-drops, the POV area simply reads **"No connection"** and reconnects
-automatically with a bounded backoff — inspection history, GPS records, and
-map markers all survive the drop.
+Everything is offline / LAN-only. The **Live Dashboard** shows the live POV,
+the Capture Photo button, a basic connection state, and the **Latest
+Inspection** below the video; the full inspection **counts and history** live
+in the Inspection section. If the live stream drops, the POV area simply reads
+**"No connection"** and reconnects automatically with a bounded backoff —
+inspection history and GPS records all survive the drop.
 
 ## Drone crack geotagging & spatial mapping (optional module)
 
@@ -593,9 +630,10 @@ use an orthomosaic for survey-grade results.
 
 ## Files
 
-- `app.py` — Flask app: dashboard, result, inspections, offline map,
-  `/api/capture` (Capture Photo), `/api/import` bridge ingest, bridge status,
-  manual-upload fallback, JSON/image APIs.
+- `app.py` — Flask app: dashboard (live POV + Capture Photo + Latest
+  Inspection), inspections, result, `/api/capture` (Capture Photo),
+  `/api/import` bridge ingest, bridge status, manual-upload fallback,
+  JSON/image APIs.
 - `capture_service.py` — on-demand single-frame capture from MediaMTX
   (`ffmpeg` snapshot, no VLC, no continuous decode) → save JPEG → GPS →
   `best.pt` → inspection. Bounded retry/backoff; clean errors.

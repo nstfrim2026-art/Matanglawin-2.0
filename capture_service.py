@@ -35,6 +35,7 @@ real stream or ffmpeg installed.
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import shutil
@@ -42,17 +43,70 @@ import subprocess
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
 log = logging.getLogger("matanglawin.capture")
 
-# ffmpeg args template for a single-frame RTSP snapshot. TCP transport is used
-# for reliability on lossy Wi-Fi; only one video frame is decoded and written.
-DEFAULT_FFMPEG_BIN = os.environ.get("MATANGLAWIN_FFMPEG", "ffmpeg")
 DEFAULT_GRAB_TIMEOUT_S = float(os.environ.get("MATANGLAWIN_CAPTURE_TIMEOUT", "8"))
 DEFAULT_RETRIES = int(os.environ.get("MATANGLAWIN_CAPTURE_RETRIES", "3"))
 DEFAULT_BACKOFF_S = float(os.environ.get("MATANGLAWIN_CAPTURE_BACKOFF", "0.4"))
+
+
+def resolve_ffmpeg(explicit: Optional[str] = None) -> Optional[str]:
+    """
+    Locate a usable ffmpeg executable, returning its absolute path or None.
+
+    Resolution order (real testing showed ffmpeg is often installed but not on
+    the MatanglaWIN process PATH - e.g. a WinGet package):
+
+      1. ``explicit`` argument, else the ``MATANGLAWIN_FFMPEG`` env var (highest
+         priority). Accepts a full path or a bare name resolved via PATH.
+      2. ``shutil.which("ffmpeg")`` (on PATH).
+      3. Sensible Windows locations, discovered by globbing (NO hardcoded
+         username, NO hardcoded exact path):
+           * WinGet packages under %LOCALAPPDATA% and %ProgramFiles%
+             (e.g. Gyan.FFmpeg, BtbN builds),
+           * common install dirs (C:\\ffmpeg\\bin, Program Files\\ffmpeg).
+
+    The result is meant to be cached by the caller.
+    """
+    # 1) explicit / env override
+    candidate = (explicit if explicit is not None
+                 else os.environ.get("MATANGLAWIN_FFMPEG", "")).strip()
+    if candidate:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return os.path.abspath(candidate)
+        found = shutil.which(candidate)
+        if found:
+            return found
+        # An explicit-but-missing override should not silently fall through to
+        # a different ffmpeg; treat it as unconfigured.
+        return None
+
+    # 2) on PATH
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    # 3) Windows discovery (glob; expand env vars; never hardcode a username)
+    patterns = []
+    for base_env in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(base_env)
+        if base:
+            patterns.append(os.path.join(base, "Microsoft", "WinGet", "Packages",
+                                         "*FFmpeg*", "**", "ffmpeg.exe"))
+            patterns.append(os.path.join(base, "**", "ffmpeg.exe"))
+    patterns += [r"C:\ffmpeg\bin\ffmpeg.exe", r"C:\ffmpeg\ffmpeg.exe"]
+    for pat in patterns:
+        try:
+            for hit in glob.glob(pat, recursive=True):
+                if os.path.isfile(hit):
+                    return os.path.abspath(hit)
+        except OSError:
+            continue
+    return None
 
 
 def default_pictures_dir() -> Path:
@@ -72,8 +126,13 @@ class CaptureError(Exception):
     """Raised when a live frame cannot be captured (clean, non-fatal)."""
 
 
+class FfmpegNotConfiguredError(CaptureError):
+    """Raised when no usable ffmpeg executable can be found (a config problem,
+    distinct from a transient 'could not read the live stream')."""
+
+
 def ffmpeg_grab(rtsp_url: str, out_path: str,
-                ffmpeg_bin: str = DEFAULT_FFMPEG_BIN,
+                ffmpeg_bin: Optional[str] = None,
                 timeout_s: float = DEFAULT_GRAB_TIMEOUT_S) -> bool:
     """
     Grab a single current frame from ``rtsp_url`` into ``out_path`` (JPEG)
@@ -81,6 +140,7 @@ def ffmpeg_grab(rtsp_url: str, out_path: str,
     missing / stream unreachable" case - it returns False so the caller can
     retry and then surface a clean error. Does NOT touch MediaMTX.
     """
+    ffmpeg_bin = ffmpeg_bin or resolve_ffmpeg() or "ffmpeg"
     cmd = [
         ffmpeg_bin,
         "-nostdin",
@@ -125,6 +185,7 @@ class CaptureService:
         pictures_dir: Optional[str] = None,
         tmp_dir: Optional[str] = None,
         grabber: Callable[[str, str], bool] = None,
+        ffmpeg_path: Optional[str] = None,
         retries: int = DEFAULT_RETRIES,
         backoff_s: float = DEFAULT_BACKOFF_S,
     ):
@@ -132,8 +193,12 @@ class CaptureService:
         self.rtsp_url_provider = rtsp_url_provider
         self.pictures_dir = Path(pictures_dir) if pictures_dir else default_pictures_dir()
         self.tmp_dir = Path(tmp_dir) if tmp_dir else (self.pictures_dir / ".tmp")
-        # Default grabber uses ffmpeg; tests inject a fake.
-        self._grabber = grabber or (lambda url, out: ffmpeg_grab(url, out))
+        # Resolve and cache the ffmpeg executable once (see resolve_ffmpeg).
+        self.ffmpeg_path = ffmpeg_path if ffmpeg_path is not None else resolve_ffmpeg()
+        # A real (ffmpeg) capture requires a resolved executable; an injected
+        # grabber (tests) does not.
+        self._custom_grabber = grabber is not None
+        self._grabber = grabber or (lambda url, out: ffmpeg_grab(url, out, ffmpeg_bin=self.ffmpeg_path))
         self.retries = max(1, int(retries))
         self.backoff_s = max(0.0, float(backoff_s))
 
@@ -145,11 +210,26 @@ class CaptureService:
         self._last_attempts = 0
         self._total_captures = 0
 
-    # -- health snapshot (internal / debug only) -----------------------
+    # -- diagnostics / health snapshot (internal only) -----------------
+
+    def ffmpeg_available(self) -> bool:
+        return self._custom_grabber or bool(self.ffmpeg_path)
 
     def status(self) -> dict:
+        """
+        Internal capture/stream diagnostic (kept out of the operator UI):
+        ffmpeg availability + resolved executable + the RTSP URL, plus the
+        last capture health figures.
+        """
+        try:
+            rtsp_url = self.rtsp_url_provider()
+        except Exception:  # noqa: BLE001
+            rtsp_url = None
         with self._lock:
             return {
+                "ffmpeg_available": self.ffmpeg_available(),
+                "ffmpeg_executable": self.ffmpeg_path,
+                "rtsp_url": rtsp_url,
                 "last_frame_ts": (self._last_success_ms / 1000.0) if self._last_success_ms else None,
                 "last_error": self._last_error,
                 "last_attempts": self._last_attempts,
@@ -171,6 +251,14 @@ class CaptureService:
         read after the bounded retries. The website/server keep running and
         MediaMTX is left untouched.
         """
+        # ffmpeg must be configured for a real capture (an injected grabber in
+        # tests bypasses this). Reported as a clear CONFIG error, distinct from
+        # a transient stream-read failure.
+        if not self.ffmpeg_available():
+            raise FfmpegNotConfiguredError(
+                "FFmpeg not configured - set MATANGLAWIN_FFMPEG or install ffmpeg on PATH"
+            )
+
         rtsp_url = None
         try:
             rtsp_url = self.rtsp_url_provider()
@@ -179,10 +267,13 @@ class CaptureService:
         if not rtsp_url:
             raise CaptureError("live stream is not available (MediaMTX URL unknown)")
 
-        trigger_ms = time.time() * 1000.0
-        captured_iso = captured_at or time.strftime(
-            "%Y-%m-%dT%H:%M:%S", time.localtime(trigger_ms / 1000.0)
-        )
+        # UTC, timezone-aware capture time so it is DIRECTLY comparable to the
+        # phone-GPS (Colota) timestamps, which are UTC. A naive local time here
+        # was the cause of the UTC+8 "Not recorded" bug: a +8h skew pushed the
+        # capture outside every GPS sample's match/age window.
+        trigger_dt = datetime.now(timezone.utc)
+        trigger_ms = trigger_dt.timestamp() * 1000.0
+        captured_iso = captured_at or trigger_dt.isoformat()
 
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = self.tmp_dir / f"grab_{uuid.uuid4().hex}.jpg"
@@ -214,7 +305,7 @@ class CaptureService:
         # Persist the clean drone frame into the operator's DJI pictures folder
         # with a timestamped, collision-free name.
         self.pictures_dir.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(trigger_ms / 1000.0))
+        stamp = trigger_dt.strftime("%Y%m%d_%H%M%S")
         saved_path = self.pictures_dir / f"capture_{stamp}_{uuid.uuid4().hex[:6]}.jpg"
         try:
             shutil.move(str(tmp_path), str(saved_path))

@@ -55,7 +55,7 @@ def test_import_raw_bytes_is_analyzed_as_dji_import(client):
     j = resp.get_json()
     assert j["status"] == "CRACK DETECTED"
     assert j["source"] == "import"
-    assert j["source_label"] == "DJI import"
+    assert j["source_label"] == "Drone Capture"
     assert j["duplicate"] is False
     # Never leak prohibited model metrics via the automatic path either
     # (latitude/longitude are allowed - they appear in the inspection details).

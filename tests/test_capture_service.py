@@ -48,19 +48,23 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(appmod, "_capture_service", None)
     monkeypatch.setattr(appmod, "bridge_status", BridgeStatus())
     monkeypatch.setattr(appmod, "telemetry_store", TelemetryStore())
+    # Simulate ffmpeg being installed (resolved) so the app-built capture
+    # service is "available"; individual tests then patch ffmpeg_grab to
+    # control the actual grab outcome (success/failure).
+    monkeypatch.setattr(capture_service, "resolve_ffmpeg", lambda *a, **k: "/usr/bin/ffmpeg-fake")
     stubs.stub_no_crack(inference_core)
     appmod.app.config["TESTING"] = True
     with appmod.app.test_client() as c:
         yield c
 
 
-def _good_grab(url, out):
+def _good_grab(url, out, **kwargs):
     """Fake grabber: writes a real clean JPEG (the 'current drone frame')."""
     stubs.write_jpg(out, value=180)
     return True
 
 
-def _bad_grab(url, out):
+def _bad_grab(url, out, **kwargs):
     """Fake grabber: the stream is unreadable."""
     return False
 
@@ -99,7 +103,7 @@ def test_capture_temporary_failure_then_success_retries(tmp_path, monkeypatch):
 
     calls = {"n": 0}
 
-    def flaky(url, out):
+    def flaky(url, out, **kwargs):
         calls["n"] += 1
         if calls["n"] < 3:      # fail the first two attempts
             return False
@@ -159,6 +163,78 @@ def test_ffmpeg_grab_missing_binary_returns_false_never_raises(tmp_path):
         ffmpeg_bin="definitely-not-a-real-ffmpeg-binary",
     )
     assert ok is False
+
+
+def test_capture_timestamp_is_utc_aware(tmp_path, monkeypatch):
+    # Fix #11: the capture timestamp must be UTC/timezone-aware so it is
+    # directly comparable to Colota's UTC timestamps (no naive local time).
+    import app as appmod
+    monkeypatch.setattr(appmod, "INSPECTIONS_DIR", tmp_path / "insp")
+    monkeypatch.setattr(appmod, "DB_PATH", tmp_path / "db.sqlite")
+    monkeypatch.setattr(appmod, "_db", None)
+    monkeypatch.setattr(appmod, "_service", None)
+    stubs.stub_no_crack(inference_core)
+    svc = CaptureService(
+        appmod.get_service(),
+        rtsp_url_provider=lambda: "rtsp://localhost:8554/matanglawin",
+        pictures_dir=str(tmp_path / "pics"),
+        grabber=_good_grab,
+    )
+    from datetime import datetime
+    result = svc.capture()
+    dt = datetime.fromisoformat(result["captured_at"])
+    assert dt.tzinfo is not None                      # tz-aware, not naive
+    assert abs(dt.utcoffset().total_seconds()) < 1    # expressed in UTC
+
+
+def test_ffmpeg_grab_success_path_builds_tcp_single_frame(monkeypatch, tmp_path):
+    # Fix #8: connect via RTSP, TCP transport, exactly one frame, save JPEG.
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        # simulate ffmpeg writing the output frame
+        out = cmd[cmd.index("-y") + 1]
+        stubs.write_jpg(out, value=90)
+        return _Proc()
+
+    monkeypatch.setattr(capture_service.subprocess, "run", fake_run)
+    out = tmp_path / "frame.jpg"
+    ok = capture_service.ffmpeg_grab("rtsp://127.0.0.1:8554/matanglawin",
+                                     str(out), ffmpeg_bin="ffmpeg")
+    assert ok is True and out.exists()
+    cmd = captured["cmd"]
+    assert "-rtsp_transport" in cmd and cmd[cmd.index("-rtsp_transport") + 1] == "tcp"
+    assert cmd[cmd.index("-frames:v") + 1] == "1"      # exactly one frame
+
+
+# ============================ ffmpeg configuration errors =====================
+
+def test_api_capture_reports_ffmpeg_not_configured(client, monkeypatch):
+    # When no ffmpeg can be resolved, /api/capture returns a CLEAR config error
+    # (distinct from the generic 'could not read the live stream').
+    import app as appmod
+    monkeypatch.setattr(capture_service, "resolve_ffmpeg", lambda *a, **k: None)
+    monkeypatch.setattr(appmod, "_capture_service", None)      # rebuild w/o ffmpeg
+    resp = client.post("/api/capture")
+    assert resp.status_code == 503
+    j = resp.get_json()
+    assert j["ok"] is False
+    assert j["error"] == "ffmpeg_not_configured"
+    assert "FFmpeg not configured" in j["detail"]
+
+
+def test_capture_status_reports_ffmpeg_diagnostics(client, monkeypatch):
+    monkeypatch.setattr(capture_service, "resolve_ffmpeg", lambda *a, **k: "/opt/ffmpeg/bin/ffmpeg")
+    import app as appmod
+    monkeypatch.setattr(appmod, "_capture_service", None)
+    snap = client.get("/api/capture/status").get_json()
+    assert snap["ffmpeg_available"] is True
+    assert snap["ffmpeg_executable"] == "/opt/ffmpeg/bin/ffmpeg"
+    assert snap["rtsp_url"].startswith("rtsp://")
 
 
 # ============================ route: POST /api/capture ========================

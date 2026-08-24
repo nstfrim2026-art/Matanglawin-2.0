@@ -42,13 +42,14 @@ def client(tmp_path, monkeypatch):
         monkeypatch.setattr(appmod, attr, None)
     monkeypatch.setattr(appmod, "bridge_status", BridgeStatus())
     monkeypatch.setattr(appmod, "telemetry_store", TelemetryStore())
+    monkeypatch.setattr(capture_service, "resolve_ffmpeg", lambda *a, **k: "/usr/bin/ffmpeg-fake")
     stubs.stub_no_crack(inference_core)
     appmod.app.config["TESTING"] = True
     with appmod.app.test_client() as c:
         yield c
 
 
-def _good_grab(url, out):
+def _good_grab(url, out, **kwargs):
     stubs.write_jpg(out, value=170)
     return True
 
@@ -90,15 +91,15 @@ def test_app_never_starts_or_kills_mediamtx():
 
 
 def test_capture_failure_leaves_mediamtx_status_reachable(client, monkeypatch):
-    monkeypatch.setattr(capture_service, "ffmpeg_grab", lambda url, out: False)
+    monkeypatch.setattr(capture_service, "ffmpeg_grab", lambda url, out, **kw: False)
     assert client.post("/api/capture").status_code == 503
     # MediaMTX status endpoint still answers cleanly afterwards.
     assert client.get("/api/mediamtx/status").status_code == 200
 
 
-# -- #17 / #21: inspection history + map markers survive a drop -------
+# -- #17 / #21: inspection history + GPS survive a stream drop --------
 
-def test_inspection_history_and_map_survive_stream_drop(client, monkeypatch):
+def test_inspection_history_and_gps_survive_stream_drop(client, monkeypatch):
     # Create one geolocated inspection.
     monkeypatch.setattr(capture_service, "ffmpeg_grab", _good_grab)
     client.post("/api/telemetry", json={"lat": 7.123456, "lon": 125.654321})
@@ -114,12 +115,10 @@ def test_inspection_history_and_map_survive_stream_drop(client, monkeypatch):
     # ...but inspection history is intact...
     hist = client.get("/api/inspections").get_json()
     assert hist["count"] == 1
-    # ...GPS records are intact...
+    assert hist["inspections"][0]["gps_available"] is True
+    assert abs(hist["inspections"][0]["latitude"] - 7.123456) < 1e-6
+    # ...and GPS records are intact.
     assert client.get("/api/telemetry/latest").get_json()["available"] is True
-    # ...and the map markers are still served.
-    geo = client.get("/api/inspections/geo").get_json()
-    assert geo["count"] == 1
-    assert abs(geo["points"][0]["latitude"] - 7.123456) < 1e-6
 
 
 # -- #18: video and GPS are independent -------------------------------
