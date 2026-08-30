@@ -777,6 +777,95 @@ def inspection_highlighted(inspection_id):
     return _send_record_image(inspection_id, "highlighted")
 
 
+def _fmt_lat(v):
+    return f"{abs(v):.6f}\u00b0 {'N' if v >= 0 else 'S'}" if v is not None else "Not recorded"
+
+
+def _fmt_lon(v):
+    return f"{abs(v):.6f}\u00b0 {'E' if v >= 0 else 'W'}" if v is not None else "Not recorded"
+
+
+def _img_data_uri(path):
+    """Read an image file and return a base64 data: URI (or None if missing)."""
+    import base64
+    if not path or not Path(path).exists():
+        return None
+    data = Path(path).read_bytes()
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+
+
+@app.route("/inspection/<int:inspection_id>/download", methods=["GET"])
+def inspection_download(inspection_id):
+    """
+    Download the inspection as a single self-contained HTML report: the
+    inspection details plus BOTH images (original + analyzed) embedded inline,
+    so it opens offline in any browser and can be saved/printed to PDF. Uses
+    only the existing record + image files - no change to detection, GPS, or DB.
+    """
+    from html import escape
+    record = get_db().get_inspection(inspection_id)
+    if record is None:
+        abort(404)
+
+    has_gps = bool(record.gps_available) and record.latitude is not None and record.longitude is not None
+    lat = _fmt_lat(record.latitude) if has_gps else "Not recorded"
+    lon = _fmt_lon(record.longitude) if has_gps else "Not recorded"
+    when = (record.timestamp[:16].replace("T", " ")) if record.timestamp else "\u2014"
+    analyzed_label = "Crack Detected Image" if record.has_crack else "Analyzed Image"
+
+    original_uri = _img_data_uri(record.original_image_path)
+    analyzed_uri = _img_data_uri(record.highlighted_image_path)
+
+    def _img_block(label, uri):
+        inner = (f'<img src="{uri}" alt="{escape(label)}">' if uri
+                 else '<p class="missing">Image unavailable</p>')
+        return (f'<figure><figcaption>{escape(label)}</figcaption>{inner}</figure>')
+
+    status_color = "#ef4444" if record.has_crack else "#22c55e"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>MatanglaWIN Inspection #{record.id} Report</title>
+<style>
+  body {{ font-family: "Segoe UI", Roboto, Arial, sans-serif; margin: 32px; color: #111; }}
+  h1 {{ font-size: 1.4rem; margin-bottom: 4px; }}
+  .status {{ display:inline-block; font-weight:800; color:#fff; background:{status_color};
+             padding:6px 14px; border-radius:8px; margin: 8px 0 18px; }}
+  table {{ border-collapse: collapse; margin-bottom: 22px; }}
+  th, td {{ text-align:left; padding:6px 18px 6px 0; vertical-align:top; }}
+  th {{ color:#555; font-weight:600; }}
+  .images {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }}
+  figure {{ margin:0; }}
+  figcaption {{ text-transform:uppercase; letter-spacing:0.6px; font-size:0.8rem;
+                color:#555; margin-bottom:6px; }}
+  img {{ width:100%; border:1px solid #ccc; border-radius:8px; display:block; }}
+  .missing {{ color:#999; }}
+  @media (max-width:640px) {{ .images {{ grid-template-columns:1fr; }} }}
+</style></head><body>
+  <h1>MatanglaWIN Inspection Report &mdash; #{record.id}</h1>
+  <div class="status">{escape(record.status)}</div>
+  <table>
+    <tr><th>Status</th><td>{escape(record.status)}</td></tr>
+    <tr><th>Latitude</th><td>{escape(lat)}</td></tr>
+    <tr><th>Longitude</th><td>{escape(lon)}</td></tr>
+    <tr><th>Date / Time</th><td>{escape(when)}</td></tr>
+    <tr><th>Source</th><td>{escape(record.source_label)}</td></tr>
+  </table>
+  <div class="images">
+    {_img_block("Original Image", original_uri)}
+    {_img_block(analyzed_label, analyzed_uri)}
+  </div>
+</body></html>"""
+
+    return Response(
+        html,
+        mimetype="text/html",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=matanglawin_inspection_{record.id}.html",
+        },
+    )
+
+
 @app.route("/api/network", methods=["GET"])
 def api_network():
     try:

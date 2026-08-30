@@ -56,6 +56,8 @@
 
     <div class="actions">
       <a href="{{ url_for('index') }}" class="btn-secondary">Back to dashboard</a>
+      <a href="{{ url_for('inspection_download', inspection_id=inspection_id) }}"
+         class="btn-secondary" download>Download Results</a>
       <a href="{{ url_for('inspections_page') }}" class="btn-primary">View inspection history</a>
     </div>
   </section>

@@ -178,6 +178,35 @@ def test_result_page_crack_shows_original_and_analyzed_side_by_side(client):
     assert f"/api/inspection/{j['id']}/highlighted" in body
     # crack feedback: pulsing banner class + audio hook are wired in
     assert "status-alarm" in body and "AudioContext" in body
+    # the result page offers a Download Results link
+    assert f"/inspection/{j['id']}/download" in body
+
+
+def test_download_results_report_contains_details_and_both_images(client):
+    stubs.stub_one_crack(inference_core)
+    j = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    resp = client.get(f"/inspection/{j['id']}/download")
+    assert resp.status_code == 200
+    # served as a single downloadable report
+    assert "attachment" in resp.headers.get("Content-Disposition", "")
+    assert f"matanglawin_inspection_{j['id']}" in resp.headers.get("Content-Disposition", "")
+    body = resp.data.decode()
+    # inspection details
+    assert "CRACK DETECTED" in body
+    for field in ("Status", "Latitude", "Longitude", "Date / Time", "Source"):
+        assert field in body
+    # both images embedded inline (base64 data URIs), each labelled
+    assert "Original Image" in body and "Crack Detected Image" in body
+    assert body.count("data:image/jpeg;base64,") == 2
+
+
+def test_download_results_missing_inspection_returns_404(client):
+    assert client.get("/inspection/999999/download").status_code == 404
 
 
 def test_api_inspect_rejects_non_image(client):
