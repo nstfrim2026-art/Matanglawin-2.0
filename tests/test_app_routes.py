@@ -158,7 +158,7 @@ def test_api_inspect_crack_flow_serves_only_two_images(client):
     assert client.get(urls["highlighted"]).status_code == 200
 
 
-def test_result_page_crack_shows_single_highlighted_image(client):
+def test_result_page_crack_shows_original_and_analyzed_side_by_side(client):
     stubs.stub_one_crack(inference_core)
     j = client.post(
         "/api/inspect",
@@ -169,10 +169,12 @@ def test_result_page_crack_shows_single_highlighted_image(client):
     body = page.data.decode()
     assert page.status_code == 200
     assert "CRACK DETECTED" in body
-    # Exactly ONE analyzed image (the fix for the duplicate-image bug), and it
-    # points at the red-highlighted photo when a crack is present.
-    assert body.count('class="shot-img"') == 1
-    assert "Analyzed photo (crack highlighted)" in body
+    # Side-by-side comparison: original on the left, analyzed/highlighted on
+    # the right, each with its own clear label.
+    assert body.count('class="shot-img"') == 2
+    assert "Original Image" in body
+    assert "Crack Detected Image" in body
+    assert f"/api/inspection/{j['id']}/original" in body
     assert f"/api/inspection/{j['id']}/highlighted" in body
     # crack feedback: pulsing banner class + audio hook are wired in
     assert "status-alarm" in body and "AudioContext" in body
