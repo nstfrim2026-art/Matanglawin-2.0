@@ -5,8 +5,26 @@
   <section class="page-head">
     <div>
       <h1>Inspection History</h1>
-      <p class="lede">Every photo inspection &mdash; automatic DJI import or manual upload &mdash; with its result.</p>
+      <p class="lede">Every photo inspection &mdash; live capture or manual upload &mdash; with its result and location.</p>
     </div>
+  </section>
+
+  <!-- ============ Inspection summary (auto-updating counters) ============ -->
+  <section class="panel summary-panel">
+    <dl class="summary-grid">
+      <div class="summary-card">
+        <dt>Inspections</dt>
+        <dd id="summary-total">0</dd>
+      </div>
+      <div class="summary-card summary-card-crack">
+        <dt>Cracks Detected</dt>
+        <dd id="summary-cracks">0</dd>
+      </div>
+      <div class="summary-card summary-card-clear">
+        <dt>Clear</dt>
+        <dd id="summary-clear">0</dd>
+      </div>
+    </dl>
   </section>
 
   <section class="panel">
@@ -67,7 +85,21 @@
       }
     }
 
+    // Summary counters (moved here from the Live Dashboard). Straight from the
+    // DB; polled so they update automatically as new inspections are created.
+    async function loadSummary() {
+      try {
+        const res = await fetch('/api/inspections/summary');
+        const s = await res.json();
+        document.getElementById('summary-total').textContent = s.total != null ? s.total : 0;
+        document.getElementById('summary-cracks').textContent = s.cracks != null ? s.cracks : 0;
+        document.getElementById('summary-clear').textContent = s.clear != null ? s.clear : 0;
+      } catch (err) { /* leave last known counts */ }
+    }
+
     loadInspections();
+    loadSummary();
     setInterval(loadInspections, 5000);
+    setInterval(loadSummary, 5000);
   </script>
 {% endblock %}

@@ -12,66 +12,47 @@
   <section class="page-head">
     <div>
       <h1>Live Inspection Dashboard</h1>
-      <p class="lede">
-        Monitor the clean DJI&nbsp;Neo&nbsp;2 point-of-view and review the latest photo
-        inspection. Press the shutter on the controller &mdash; the captured photo is
-        transferred, analyzed, and shown below automatically. No upload, no Analyze button.
-      </p>
+      <p class="lede">Clean DJI&nbsp;Neo&nbsp;2 point-of-view. Aim, then press Capture&nbsp;Photo.</p>
     </div>
   </section>
 
-  <!-- ============ Inspection summary (auto-updating counters) ============ -->
-  <section class="panel summary-panel">
-    <dl class="summary-grid">
-      <div class="summary-card">
-        <dt>Inspections</dt>
-        <dd id="summary-total">0</dd>
-      </div>
-      <div class="summary-card summary-card-crack">
-        <dt>Cracks Detected</dt>
-        <dd id="summary-cracks">0</dd>
-      </div>
-      <div class="summary-card summary-card-clear">
-        <dt>Clear</dt>
-        <dd id="summary-clear">0</dd>
-      </div>
-    </dl>
-  </section>
-
-  <!-- ============ PIPELINE A: display-only live drone POV ============ -->
+  <!-- ============ Live drone POV (display only) + Capture Photo ============ -->
   <section class="panel pov-panel">
     <div class="panel-head">
       <h2>Live Drone POV</h2>
-      <span id="stream-badge" class="badge badge-connecting">UNKNOWN</span>
+      <span id="stream-badge" class="badge badge-connecting">Connecting&hellip;</span>
     </div>
+
     <div class="pov-stage" id="pov-frame">
       <div id="pov-placeholder" class="pov-placeholder">
         <div class="pov-placeholder-inner">
           <span class="pov-eye">&#128065;</span>
-          <p class="pov-title">No connection</p>
+          <p class="pov-title" id="pov-placeholder-text">No connection</p>
         </div>
       </div>
       <iframe id="pov-iframe" class="pov-iframe" title="Live drone POV"
               allow="autoplay; fullscreen" style="display:none;"></iframe>
     </div>
+
+    <div class="capture-bar">
+      <button type="button" id="capture-btn" class="capture-btn is-idle">
+        <span class="capture-icon" aria-hidden="true">&#128247;</span>
+        <span class="capture-label" id="capture-label">Capture Photo</span>
+      </button>
+      <span id="capture-status" class="capture-status" role="status" aria-live="polite"></span>
+    </div>
   </section>
 
-  <!-- ============ PIPELINE B: latest automatic photo inspection ============ -->
+  <!-- ============ Latest Inspection (updates after each capture) ============ -->
   <section class="panel latest-panel">
     <div class="panel-head">
       <h2>Latest Inspection</h2>
-      <div class="head-meta">
-        <span id="bridge-badge" class="badge badge-connecting"
-              title="Automatic DJI photo-transfer bridge">PHOTO BRIDGE: &hellip;</span>
-        <span id="latest-live-note" class="auto-note">Updating automatically&hellip;</span>
-      </div>
+      <span id="latest-live-note" class="auto-note">Updating automatically&hellip;</span>
     </div>
-
-    <div id="latest-toast" class="latest-toast" style="display:none;"></div>
 
     <div id="latest-empty" class="empty-state">
       <p>No inspection yet.</p>
-      <p class="hint">Capture a photo with the drone, or use Manual Upload for testing.</p>
+      <p class="hint">Aim the drone and press <strong>Capture Photo</strong> above.</p>
     </div>
 
     <div id="latest-content" class="latest-layout" style="display:none;">
@@ -86,7 +67,7 @@
         <a id="latest-view" class="btn-secondary" href="#">Open full result</a>
       </div>
 
-      <div class="latest-images single" id="latest-images">
+      <div class="latest-images single">
         <figure class="shot">
           <figcaption id="latest-caption">Analyzed photo</figcaption>
           <img id="latest-result" class="shot-img" alt="Analyzed inspection photo">
@@ -94,7 +75,6 @@
       </div>
     </div>
   </section>
-
 {% endblock %}
 
 {% block scripts %}

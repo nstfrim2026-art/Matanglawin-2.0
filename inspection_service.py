@@ -86,13 +86,8 @@ class InspectionService:
         min_length_frac: float = DEFAULT_MIN_LENGTH_FRAC,
         refine: bool = inference_core.DEFAULT_REFINE,
         telemetry_store=None,
-        radius_m: float = 50.0,
     ):
         self.db = db
-        # Inspection-area radius (metres) stored with each geotagged
-        # inspection - the operator marker represents this area around the
-        # recorded GPS location. Configurable via PHONE_GPS_RADIUS_METERS.
-        self.radius_m = radius_m
         # Optional aircraft-telemetry store (telemetry_store.TelemetryStore).
         # When present, each inspection is stamped with the aircraft GPS
         # sample nearest to the capture time. Absent -> no geotag, and
@@ -231,7 +226,13 @@ class InspectionService:
         gps = {"gps_available": False, "gps_time_delta_ms": None, "latitude": None,
                "longitude": None, "altitude_m": None, "gps_source": None}
         captured_iso = None
-        if source == "import":
+        # Automatic captures (a live /api/capture frame grab OR a DJI photo
+        # import) are geotagged with the phone GPS. A manual upload stays
+        # deliberately GPS-free. Both automatic paths use the robust
+        # association: nearest sample, else the latest usable fix within the
+        # configured max age - so a correctly-sending phone never yields
+        # "Not recorded" just because the timestamps don't line up exactly.
+        if source in ("import", "capture"):
             # Record the capture time so a late SRT file can backfill by
             # nearest-timestamp match (Mode B).
             captured_iso = captured_at if isinstance(captured_at, str) and captured_at else ts_str
@@ -241,11 +242,15 @@ class InspectionService:
                     capture_ms = _ts.parse_timestamp_ms(captured_at)
                     if capture_ms is None:
                         capture_ms = now * 1000.0
-                    # match_for_capture only returns a fix when a sample is
-                    # within the freshness window of the capture time, so a
-                    # stale/last-known position (e.g. Colota turned off) is
-                    # NOT reused - it yields gps_available=False.
-                    match = self.telemetry_store.match_for_capture(capture_ms)
+                    # use_stale_fallback=True: if no sample sits inside the tight
+                    # match window, fall back to the latest valid phone-GPS fix
+                    # provided it is no older than PHONE_GPS_MAX_AGE_SECONDS. A
+                    # genuinely stale/absent fix (e.g. Colota turned off long ago)
+                    # still yields gps_available=False - never a wrong/fabricated
+                    # coordinate, and never (0,0).
+                    match = self.telemetry_store.match_for_capture(
+                        capture_ms, use_stale_fallback=True
+                    )
                     gps.update({k: match[k] for k in gps})
                 except Exception:  # noqa: BLE001 - geotag is best-effort only
                     pass
@@ -265,7 +270,6 @@ class InspectionService:
                 gps_time_delta_ms=gps["gps_time_delta_ms"],
                 gps_source=gps["gps_source"],
                 captured_at=captured_iso,
-                radius_m=self.radius_m if gps["gps_available"] else None,
                 capture_id=capture_id,
             )
         except sqlite3.IntegrityError:

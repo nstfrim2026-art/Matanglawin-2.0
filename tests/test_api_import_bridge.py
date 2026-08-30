@@ -55,7 +55,7 @@ def test_import_raw_bytes_is_analyzed_as_dji_import(client):
     j = resp.get_json()
     assert j["status"] == "CRACK DETECTED"
     assert j["source"] == "import"
-    assert j["source_label"] == "DJI import"
+    assert j["source_label"] == "Drone Capture"
     assert j["duplicate"] is False
     # Never leak prohibited model metrics via the automatic path either
     # (latitude/longitude are allowed - they appear in the inspection details).
@@ -121,10 +121,15 @@ def test_bridge_status_offline_then_ready(client):
     assert s2["photos_received"] == 1
 
 
-def test_dashboard_shows_photo_bridge_indicator(client):
+def test_dashboard_is_clean_and_bridge_status_api_still_works(client):
+    # The Live Dashboard is intentionally clean: it focuses on the live POV
+    # and the Capture Photo button, and no longer surfaces the photo-bridge
+    # badge. The bridge ingest + status API remain available (DJI import path).
     body = client.get("/").data.decode()
-    assert "PHOTO BRIDGE" in body
-    assert "bridge-badge" in body
+    assert "PHOTO BRIDGE" not in body
+    assert 'id="capture-btn"' in body
+    snap = client.get("/api/bridge/status").get_json()
+    assert "state" in snap
 
 
 def test_import_does_not_touch_manual_upload_source(client):

@@ -58,7 +58,6 @@ CREATE TABLE IF NOT EXISTS inspections (
     gps_time_delta_ms REAL,
     gps_source TEXT,
     captured_at TEXT,
-    radius_m REAL,
     capture_id TEXT
 );
 """
@@ -89,7 +88,6 @@ _EXPECTED_COLUMNS = {
     "gps_time_delta_ms": "REAL",
     "gps_source": "TEXT",
     "captured_at": "TEXT",
-    "radius_m": "REAL",
     "capture_id": "TEXT",
 }
 
@@ -110,7 +108,6 @@ class InspectionRecord:
     gps_time_delta_ms: Optional[float] = None
     gps_source: Optional[str] = None
     captured_at: Optional[str] = None
-    radius_m: Optional[float] = None
     capture_id: Optional[str] = None
 
     @property
@@ -119,7 +116,15 @@ class InspectionRecord:
 
     @property
     def source_label(self) -> str:
-        return "DJI import" if self.source == "import" else "Manual upload"
+        # One consistent label per source. A production capture is always
+        # "Capture"; the DJI photo-transfer bridge is "Drone Capture"; only the
+        # testing fallback is "Manual upload". A record has exactly one source,
+        # so it can never show both "Manual Upload" and "Drone Upload".
+        return {
+            "capture": "Capture",
+            "import": "Drone Capture",
+            "upload": "Manual upload",
+        }.get(self.source, "Manual upload")
 
     def to_dict(self) -> dict:
         """
@@ -202,7 +207,6 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         captured_at: Optional[str] = None,
-        radius_m: Optional[float] = None,
         capture_id: Optional[str] = None,
     ) -> int:
         """
@@ -218,9 +222,9 @@ class InspectionDB:
                     (timestamp, status, source, original_image_path,
                      highlighted_image_path, num_instances,
                      latitude, longitude, altitude_m, gps_available,
-                     gps_time_delta_ms, gps_source, captured_at, radius_m,
+                     gps_time_delta_ms, gps_source, captured_at,
                      capture_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -236,7 +240,6 @@ class InspectionDB:
                     gps_time_delta_ms,
                     gps_source,
                     captured_at,
-                    radius_m,
                     capture_id,
                 ),
             )
@@ -281,24 +284,21 @@ class InspectionDB:
         gps_time_delta_ms: Optional[float] = None,
         gps_source: Optional[str] = None,
         gps_available: bool = True,
-        radius_m: Optional[float] = None,
     ) -> bool:
         """
         Backfill / update an inspection's location (e.g. once telemetry
-        appears after capture). Returns True if a row was updated. When
-        `radius_m` is given, the inspection-area radius is set too.
+        appears after capture). Returns True if a row was updated.
         """
         with self._cursor() as cur:
             cur.execute(
                 """
                 UPDATE inspections
                    SET latitude = ?, longitude = ?, gps_available = ?,
-                       gps_time_delta_ms = ?, gps_source = ?,
-                       radius_m = COALESCE(?, radius_m)
+                       gps_time_delta_ms = ?, gps_source = ?
                  WHERE id = ?
                 """,
                 (latitude, longitude, 1 if gps_available else 0,
-                 gps_time_delta_ms, gps_source, radius_m, inspection_id),
+                 gps_time_delta_ms, gps_source, inspection_id),
             )
             return cur.rowcount > 0
 
@@ -374,6 +374,5 @@ def _row_to_record(row: sqlite3.Row) -> InspectionRecord:
         gps_time_delta_ms=row["gps_time_delta_ms"] if "gps_time_delta_ms" in keys else None,
         gps_source=row["gps_source"] if "gps_source" in keys else None,
         captured_at=row["captured_at"] if "captured_at" in keys else None,
-        radius_m=row["radius_m"] if "radius_m" in keys else None,
         capture_id=row["capture_id"] if "capture_id" in keys else None,
     )

@@ -153,10 +153,10 @@ def test_manual_upload_never_gets_gps_even_with_active_colota(client):
     assert "Not recorded" in body
 
 
-# -- map removed -----------------------------------------------------
+# -- map removed entirely --------------------------------------------
 
 def test_map_routes_are_gone(client):
-    # The map feature (page, tiles, geo API) was removed entirely.
+    # The map feature (page, tiles, geo API) has been removed for production.
     assert client.get("/map").status_code == 404
     assert client.get("/api/inspections/geo").status_code == 404
     assert client.get("/maps/5/10/12.png").status_code == 404

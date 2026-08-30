@@ -47,18 +47,24 @@ def test_dashboard_is_the_main_page(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert b"Live Drone POV" in resp.data
-    assert b"Latest Inspection" in resp.data
+    # The production capture control lives on the dashboard.
+    assert b"Capture Photo" in resp.data
+    assert b'id="capture-btn"' in resp.data
 
 
 def test_dashboard_pov_is_clean_display_only(client):
     resp = client.get("/")
     body = resp.data.decode()
-    # The shutter-capture workflow is still described (in the intro lede), but
-    # the redundant POV caption sentence was removed.
-    assert "shutter" in body.lower()
+    # The old "press the shutter on the controller ... transferred ... no upload,
+    # no Analyze button" explanatory paragraph was removed entirely (the
+    # workflow is now the Capture Photo button).
+    assert "shutter" not in body.lower()
+    assert "no analyze button" not in body.lower()
     assert "monitoring only" not in body.lower()
-    # No bounding-box / confidence / FPS language anywhere on the page.
-    for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only"):
+    # No bounding-box / confidence / FPS / overlay language anywhere on the page
+    # (the live view is clean; AI results appear only in the Inspection section).
+    for banned in ("bounding box", "confidence", "FPS", "IoU", "crack-only",
+                   "segmentation overlay"):
         assert banned.lower() not in body.lower()
 
 
@@ -152,7 +158,7 @@ def test_api_inspect_crack_flow_serves_only_two_images(client):
     assert client.get(urls["highlighted"]).status_code == 200
 
 
-def test_result_page_crack_shows_single_highlighted_image(client):
+def test_result_page_crack_shows_original_and_analyzed_side_by_side(client):
     stubs.stub_one_crack(inference_core)
     j = client.post(
         "/api/inspect",
@@ -163,13 +169,44 @@ def test_result_page_crack_shows_single_highlighted_image(client):
     body = page.data.decode()
     assert page.status_code == 200
     assert "CRACK DETECTED" in body
-    # Exactly ONE analyzed image (the fix for the duplicate-image bug), and it
-    # points at the red-highlighted photo when a crack is present.
-    assert body.count('class="shot-img"') == 1
-    assert "Analyzed photo (crack highlighted)" in body
+    # Side-by-side comparison: original on the left, analyzed/highlighted on
+    # the right, each with its own clear label.
+    assert body.count('class="shot-img"') == 2
+    assert "Original Image" in body
+    assert "Crack Detected Image" in body
+    assert f"/api/inspection/{j['id']}/original" in body
     assert f"/api/inspection/{j['id']}/highlighted" in body
     # crack feedback: pulsing banner class + audio hook are wired in
     assert "status-alarm" in body and "AudioContext" in body
+    # the result page offers a Download Results link
+    assert f"/inspection/{j['id']}/download" in body
+
+
+def test_download_results_report_contains_details_and_both_images(client):
+    stubs.stub_one_crack(inference_core)
+    j = client.post(
+        "/api/inspect",
+        data={"image": (io.BytesIO(stubs.jpg_bytes()), "t.jpg")},
+        content_type="multipart/form-data",
+    ).get_json()
+
+    resp = client.get(f"/inspection/{j['id']}/download")
+    assert resp.status_code == 200
+    # served as a single downloadable report
+    assert "attachment" in resp.headers.get("Content-Disposition", "")
+    assert f"matanglawin_inspection_{j['id']}" in resp.headers.get("Content-Disposition", "")
+    body = resp.data.decode()
+    # inspection details
+    assert "CRACK DETECTED" in body
+    for field in ("Status", "Latitude", "Longitude", "Date / Time", "Source"):
+        assert field in body
+    # both images embedded inline (base64 data URIs), each labelled
+    assert "Original Image" in body and "Crack Detected Image" in body
+    assert body.count("data:image/jpeg;base64,") == 2
+
+
+def test_download_results_missing_inspection_returns_404(client):
+    assert client.get("/inspection/999999/download").status_code == 404
 
 
 def test_api_inspect_rejects_non_image(client):

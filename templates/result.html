@@ -41,16 +41,23 @@
       </div>
     </dl>
 
-    <div class="result-images single">
+    <div class="result-images">
       <figure class="shot">
-        <figcaption>{{ 'Analyzed photo (crack highlighted)' if has_crack else 'Analyzed photo' }}</figcaption>
-        <img src="{{ highlighted_url if has_crack else original_url }}"
-             alt="Analyzed inspection photo" class="shot-img">
+        <figcaption>Original Image</figcaption>
+        <img src="{{ original_url }}"
+             alt="Original captured image" class="shot-img">
+      </figure>
+      <figure class="shot">
+        <figcaption>{{ 'Crack Detected Image' if has_crack else 'Analyzed Image' }}</figcaption>
+        <img src="{{ highlighted_url }}"
+             alt="AI analyzed / crack-highlighted image" class="shot-img">
       </figure>
     </div>
 
     <div class="actions">
       <a href="{{ url_for('index') }}" class="btn-secondary">Back to dashboard</a>
+      <a href="{{ url_for('inspection_download', inspection_id=inspection_id) }}"
+         class="btn-secondary" download>Download Results</a>
       <a href="{{ url_for('inspections_page') }}" class="btn-primary">View inspection history</a>
     </div>
   </section>

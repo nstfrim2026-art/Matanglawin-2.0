@@ -88,7 +88,14 @@ from detector import (
     DEFAULT_TILED,
     DEFAULT_UNSHARP,
 )
+from capture_service import (
+    CaptureService,
+    CaptureError,
+    FfmpegNotConfiguredError,
+    default_pictures_dir,
+)
 from import_ledger import ImportLedger, hash_bytes
+import telemetry_store as _telemetry_module
 from telemetry_store import TelemetryStore
 from srt_watcher import SrtWatcher
 from inference_core import DEFAULT_REFINE, get_model
@@ -142,6 +149,12 @@ def _configured_dirs(env_name: str, default: str = "") -> list:
 #   set MATANGLAWIN_SRT_DIR=%USERPROFILE%\Videos\DJI
 SRT_DIRS = _configured_dirs("MATANGLAWIN_SRT_DIR", str(DATA_DIR / "srt")) + \
     _configured_dirs("MATANGLAWIN_CAPTURE_DIR", "")
+
+# Where photos captured from the live MediaMTX stream are written. Default is
+# the DJI-style pictures folder in the user's profile; override with
+# MATANGLAWIN_PICTURES_DIR. Created lazily on first capture (never crashes if
+# it can't be created up front).
+PICTURES_DIR = default_pictures_dir()
 
 WEIGHTS = os.environ.get("WEIGHTS", str(RESOURCE_DIR / "best.pt"))
 ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -236,6 +249,7 @@ _db: InspectionDB = None
 _service: InspectionService = None
 _watcher: PhotoImportWatcher = None
 _import_ledger: ImportLedger = None
+_capture_service: CaptureService = None
 _lock_obj = None
 
 # Liveness of the automatic photo-transfer bridge (companion uploader).
@@ -246,7 +260,11 @@ bridge_status = BridgeStatus()
 # /api/telemetry (the phone GPS collector, e.g. Colota) and captures are
 # stamped with the sample nearest in time. The latest sample is persisted
 # locally so it survives a restart.
-telemetry_store = TelemetryStore(persist_path=str(DATA_DIR / "telemetry_latest.json"))
+telemetry_store = TelemetryStore(
+    persist_path=str(DATA_DIR / "telemetry_latest.json"),
+    max_age_ms=_telemetry_module.phone_gps_max_age_ms(),
+    stale_ms=_telemetry_module.phone_gps_max_age_ms(),
+)
 _srt_watcher: SrtWatcher = None
 
 
@@ -272,11 +290,9 @@ def get_service() -> InspectionService:
     if _service is None:
         with _get_lock():
             if _service is None:
-                import telemetry_store as _ts
                 _service = InspectionService(
                     get_db(), str(INSPECTIONS_DIR), weights=WEIGHTS,
-                    telemetry_store=telemetry_store,
-                    radius_m=_ts.phone_gps_radius_m(), **detector_config()
+                    telemetry_store=telemetry_store, **detector_config()
                 )
     return _service
 
@@ -288,6 +304,25 @@ def get_watcher() -> PhotoImportWatcher:
             if _watcher is None:
                 _watcher = PhotoImportWatcher(str(IMPORT_DIR), get_service())
     return _watcher
+
+
+def _live_rtsp_url() -> str:
+    """Current MediaMTX RTSP URL (localhost) for on-demand frame capture."""
+    return network_config.get_network_info().rtsp_url
+
+
+def get_capture_service() -> CaptureService:
+    global _capture_service
+    if _capture_service is None:
+        with _get_lock():
+            if _capture_service is None:
+                _capture_service = CaptureService(
+                    get_service(),
+                    rtsp_url_provider=_live_rtsp_url,
+                    pictures_dir=str(PICTURES_DIR),
+                    tmp_dir=str(IMPORT_TMP_DIR / "capture"),
+                )
+    return _capture_service
 
 
 def get_srt_watcher() -> SrtWatcher:
@@ -448,6 +483,55 @@ def api_inspect():
             pass
 
     return jsonify(_record_payload(record))
+
+
+# ---------------------------------------------------------------------------
+# Live capture service: the production photo path.
+#
+# The dashboard's "Capture Photo" button calls this. It grabs the CURRENT
+# MediaMTX frame (no VLC, no desktop screenshot, no continuous video decode),
+# saves it as a clean JPEG in the operator's DJI pictures folder, associates
+# the latest usable phone GPS, runs best.pt once, and creates one inspection -
+# all with no manual upload and no separate Analyze step.
+# ---------------------------------------------------------------------------
+@app.route("/api/capture", methods=["POST"])
+def api_capture():
+    """Capture the current live frame -> GPS -> best.pt -> inspection record."""
+    captured_at = request.form.get("captured_at") or request.headers.get("X-Captured-At")
+    try:
+        result = get_capture_service().capture(captured_at=captured_at)
+    except FfmpegNotConfiguredError as exc:
+        # A configuration problem (no usable ffmpeg) - reported distinctly from
+        # a transient stream failure so the operator knows to install/point at
+        # ffmpeg rather than chase the network.
+        log.warning("[CAPTURE] %s", exc)
+        return jsonify({"ok": False, "error": "ffmpeg_not_configured", "detail": str(exc)}), 503
+    except CaptureError as exc:
+        # A temporary stream/network failure is a normal condition, not a
+        # crash: return a clean, human-readable error the UI can show without
+        # exposing a stack trace. MediaMTX and inspection history are untouched.
+        log.warning("[CAPTURE] %s", exc)
+        return jsonify({"ok": False, "error": "capture_failed", "detail": str(exc)}), 503
+    except Exception as exc:  # noqa: BLE001 - last-resort guard; never 500 the whole app
+        log.error("[CAPTURE] unexpected error: %s", exc)
+        return jsonify({"ok": False, "error": "capture_failed", "detail": str(exc)}), 503
+
+    record = result["record"]
+    payload = _record_payload(record)
+    payload["ok"] = True
+    payload["image_path"] = result["image_path"]
+    payload["captured_at"] = result["captured_at"]
+    log.info("[MATANGLAWIN] Capture -> %s (inspection #%s)", record.status, record.id)
+    return jsonify(payload), 201
+
+
+@app.route("/api/capture/status", methods=["GET"])
+def api_capture_status():
+    """Internal capture/stream-health snapshot (debug only; not an operator panel)."""
+    try:
+        return jsonify(get_capture_service().status())
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +775,95 @@ def inspection_original(inspection_id):
 @app.route("/api/inspection/<int:inspection_id>/highlighted", methods=["GET"])
 def inspection_highlighted(inspection_id):
     return _send_record_image(inspection_id, "highlighted")
+
+
+def _fmt_lat(v):
+    return f"{abs(v):.6f}\u00b0 {'N' if v >= 0 else 'S'}" if v is not None else "Not recorded"
+
+
+def _fmt_lon(v):
+    return f"{abs(v):.6f}\u00b0 {'E' if v >= 0 else 'W'}" if v is not None else "Not recorded"
+
+
+def _img_data_uri(path):
+    """Read an image file and return a base64 data: URI (or None if missing)."""
+    import base64
+    if not path or not Path(path).exists():
+        return None
+    data = Path(path).read_bytes()
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+
+
+@app.route("/inspection/<int:inspection_id>/download", methods=["GET"])
+def inspection_download(inspection_id):
+    """
+    Download the inspection as a single self-contained HTML report: the
+    inspection details plus BOTH images (original + analyzed) embedded inline,
+    so it opens offline in any browser and can be saved/printed to PDF. Uses
+    only the existing record + image files - no change to detection, GPS, or DB.
+    """
+    from html import escape
+    record = get_db().get_inspection(inspection_id)
+    if record is None:
+        abort(404)
+
+    has_gps = bool(record.gps_available) and record.latitude is not None and record.longitude is not None
+    lat = _fmt_lat(record.latitude) if has_gps else "Not recorded"
+    lon = _fmt_lon(record.longitude) if has_gps else "Not recorded"
+    when = (record.timestamp[:16].replace("T", " ")) if record.timestamp else "\u2014"
+    analyzed_label = "Crack Detected Image" if record.has_crack else "Analyzed Image"
+
+    original_uri = _img_data_uri(record.original_image_path)
+    analyzed_uri = _img_data_uri(record.highlighted_image_path)
+
+    def _img_block(label, uri):
+        inner = (f'<img src="{uri}" alt="{escape(label)}">' if uri
+                 else '<p class="missing">Image unavailable</p>')
+        return (f'<figure><figcaption>{escape(label)}</figcaption>{inner}</figure>')
+
+    status_color = "#ef4444" if record.has_crack else "#22c55e"
+    html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<title>MatanglaWIN Inspection #{record.id} Report</title>
+<style>
+  body {{ font-family: "Segoe UI", Roboto, Arial, sans-serif; margin: 32px; color: #111; }}
+  h1 {{ font-size: 1.4rem; margin-bottom: 4px; }}
+  .status {{ display:inline-block; font-weight:800; color:#fff; background:{status_color};
+             padding:6px 14px; border-radius:8px; margin: 8px 0 18px; }}
+  table {{ border-collapse: collapse; margin-bottom: 22px; }}
+  th, td {{ text-align:left; padding:6px 18px 6px 0; vertical-align:top; }}
+  th {{ color:#555; font-weight:600; }}
+  .images {{ display:grid; grid-template-columns:1fr 1fr; gap:20px; }}
+  figure {{ margin:0; }}
+  figcaption {{ text-transform:uppercase; letter-spacing:0.6px; font-size:0.8rem;
+                color:#555; margin-bottom:6px; }}
+  img {{ width:100%; border:1px solid #ccc; border-radius:8px; display:block; }}
+  .missing {{ color:#999; }}
+  @media (max-width:640px) {{ .images {{ grid-template-columns:1fr; }} }}
+</style></head><body>
+  <h1>MatanglaWIN Inspection Report &mdash; #{record.id}</h1>
+  <div class="status">{escape(record.status)}</div>
+  <table>
+    <tr><th>Status</th><td>{escape(record.status)}</td></tr>
+    <tr><th>Latitude</th><td>{escape(lat)}</td></tr>
+    <tr><th>Longitude</th><td>{escape(lon)}</td></tr>
+    <tr><th>Date / Time</th><td>{escape(when)}</td></tr>
+    <tr><th>Source</th><td>{escape(record.source_label)}</td></tr>
+  </table>
+  <div class="images">
+    {_img_block("Original Image", original_uri)}
+    {_img_block(analyzed_label, analyzed_uri)}
+  </div>
+</body></html>"""
+
+    return Response(
+        html,
+        mimetype="text/html",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=matanglawin_inspection_{record.id}.html",
+        },
+    )
 
 
 @app.route("/api/network", methods=["GET"])

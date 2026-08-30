@@ -25,7 +25,7 @@ def test_add_get_roundtrip(tmp_path):
     rec = db.get_inspection(iid)
     assert rec.status == STATUS_CRACK
     assert rec.source == "import"
-    assert rec.source_label == "DJI import"
+    assert rec.source_label == "Drone Capture"
     assert rec.has_crack is True
     assert rec.original_image_path == "/o.jpg"
     assert rec.highlighted_image_path == "/h.jpg"
